@@ -95,6 +95,8 @@ pub fn text_searchability(_bytes: &[u8]) -> TextSearchability {
     searchability_verdict(None)
 }
 
+pub mod import;
+
 use std::collections::{HashMap, HashSet};
 use std::num::NonZeroU16;
 use std::sync::Arc;
