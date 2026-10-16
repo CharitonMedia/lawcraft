@@ -2617,3 +2617,8 @@ preview	Title	제목
 	More tabs	탭 더 보기
 # #3013: Insert Table of Figures
 	Include label and number	레이블 및 번호 포함
+
+# File › Options › Add-ins
+	Add-ins	추가 기능
+	No add-ins are installed.	설치된 추가 기능이 없습니다.
+	Each add-in stays off until you turn it on.	각 추가 기능은 켤 때까지 꺼져 있습니다.

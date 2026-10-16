@@ -2764,3 +2764,8 @@
 	More tabs	Още раздели
 # #3013: Insert Table of Figures
 	Include label and number	Включване на етикета и номера
+
+# File › Options › Add-ins
+	Add-ins	Добавки
+	No add-ins are installed.	Няма инсталирани добавки.
+	Each add-in stays off until you turn it on.	Всяка добавка е изключена, докато не я включите.

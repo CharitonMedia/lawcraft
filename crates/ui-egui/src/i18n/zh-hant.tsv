@@ -2368,3 +2368,8 @@
 	More tabs	更多索引標籤
 # #3013: Insert Table of Figures
 	Include label and number	包含標籤和編號
+
+# File › Options › Add-ins
+	Add-ins	增益集
+	No add-ins are installed.	未安裝任何增益集。
+	Each add-in stays off until you turn it on.	每個增益集在您開啟之前都會保持關閉。

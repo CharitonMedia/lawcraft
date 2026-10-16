@@ -2814,3 +2814,8 @@ template	Letter	Thư
 	More tabs	Các tab khác
 # #3013: Insert Table of Figures
 	Include label and number	Bao gồm nhãn và số
+
+# File › Options › Add-ins
+	Add-ins	Phần bổ trợ
+	No add-ins are installed.	Chưa cài đặt phần bổ trợ nào.
+	Each add-in stays off until you turn it on.	Mỗi phần bổ trợ tắt cho đến khi bạn bật.

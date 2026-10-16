@@ -2729,3 +2729,8 @@ preview	Title	Título
 	More tabs	Más pestañas
 # #3013: Insert Table of Figures
 	Include label and number	Incluir rótulo y número
+
+# File › Options › Add-ins
+	Add-ins	Complementos
+	No add-ins are installed.	No hay complementos instalados.
+	Each add-in stays off until you turn it on.	Cada complemento permanece desactivado hasta que lo active.

@@ -2773,3 +2773,8 @@ preview	Title	Пример
 	More tabs	Другие вкладки
 # #3013: Insert Table of Figures
 	Include label and number	Включить подпись и номер
+
+# File › Options › Add-ins
+	Add-ins	Надстройки
+	No add-ins are installed.	Надстройки не установлены.
+	Each add-in stays off until you turn it on.	Каждая надстройка выключена, пока вы её не включите.

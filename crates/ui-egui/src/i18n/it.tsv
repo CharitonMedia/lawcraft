@@ -2799,3 +2799,8 @@ template	Letter	Lettera
 	More tabs	Altre schede
 # #3013: Insert Table of Figures
 	Include label and number	Includi etichetta e numero
+
+# File › Options › Add-ins
+	Add-ins	Aggiunte
+	No add-ins are installed.	Nessuna aggiunta installata.
+	Each add-in stays off until you turn it on.	Ogni aggiunta resta disattivata finché non la attivi.

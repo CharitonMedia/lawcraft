@@ -2379,3 +2379,8 @@
 	More tabs	Інші вкладки
 # #3013: Insert Table of Figures
 	Include label and number	Додавати мітку й номер
+
+# File › Options › Add-ins
+	Add-ins	Надбудови
+	No add-ins are installed.	Надбудови не встановлено.
+	Each add-in stays off until you turn it on.	Кожна надбудова вимкнена, доки ви її не ввімкнете.

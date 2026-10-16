@@ -2766,3 +2766,8 @@ preview	Title	Ukázka
 	More tabs	Další karty
 # #3013: Insert Table of Figures
 	Include label and number	Zahrnout popisek a číslo
+
+# File › Options › Add-ins
+	Add-ins	Doplňky
+	No add-ins are installed.	Nejsou nainstalovány žádné doplňky.
+	Each add-in stays off until you turn it on.	Každý doplněk zůstane vypnutý, dokud ho nezapnete.

@@ -2381,3 +2381,8 @@
 	More tabs	Још картица
 # #3013: Insert Table of Figures
 	Include label and number	Укључи ознаку и број
+
+# File › Options › Add-ins
+	Add-ins	Додаци
+	No add-ins are installed.	Нема инсталираних додатака.
+	Each add-in stays off until you turn it on.	Сваки додатак остаје искључен док га не укључите.

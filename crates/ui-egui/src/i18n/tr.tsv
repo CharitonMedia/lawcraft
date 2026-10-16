@@ -2772,3 +2772,8 @@ preview	Title	Örnek
 	More tabs	Diğer sekmeler
 # #3013: Insert Table of Figures
 	Include label and number	Etiketi ve numarayı ekle
+
+# File › Options › Add-ins
+	Add-ins	Eklentiler
+	No add-ins are installed.	Yüklü eklenti yok.
+	Each add-in stays off until you turn it on.	Her eklenti siz açana kadar kapalı kalır.

@@ -2401,3 +2401,8 @@
 	More tabs	Veel vahekaarte
 # #3013: Insert Table of Figures
 	Include label and number	Lisa silt ja number
+
+# File › Options › Add-ins
+	Add-ins	Lisandmoodulid
+	No add-ins are installed.	Lisandmooduleid pole installitud.
+	Each add-in stays off until you turn it on.	Iga lisandmoodul jääb välja, kuni selle sisse lülitate.

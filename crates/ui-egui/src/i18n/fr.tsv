@@ -2775,3 +2775,8 @@ template	Letter	Lettre
 	More tabs	Plus d'onglets
 # #3013: Insert Table of Figures
 	Include label and number	Inclure l’étiquette et le numéro
+
+# File › Options › Add-ins
+	Add-ins	Compléments
+	No add-ins are installed.	Aucun complément n’est installé.
+	Each add-in stays off until you turn it on.	Chaque complément reste désactivé jusqu’à ce que vous l’activiez.

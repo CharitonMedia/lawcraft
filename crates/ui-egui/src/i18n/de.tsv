@@ -2366,3 +2366,8 @@
 	More tabs	Weitere Registerkarten
 # #3013: Insert Table of Figures
 	Include label and number	Bezeichnung und Nummer einbeziehen
+
+# File › Options › Add-ins
+	Add-ins	Add-Ins
+	No add-ins are installed.	Es sind keine Add-Ins installiert.
+	Each add-in stays off until you turn it on.	Jedes Add-In bleibt aus, bis Sie es einschalten.
