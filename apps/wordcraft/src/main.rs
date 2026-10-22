@@ -279,7 +279,7 @@ fn app_icon() -> Option<egui::IconData> {
     #[cfg(target_os = "macos")]
     let png: &[u8] = include_bytes!("../../../assets/app-icon/wordcraft-macos-512.png");
     #[cfg(not(target_os = "macos"))]
-    let png: &[u8] = include_bytes!("../../../assets/app-icon/hicolor/256x256/apps/ai.storyteller.wordcraft.png");
+    let png: &[u8] = include_bytes!("../../../assets/app-icon/hicolor/256x256/apps/com.charitonmedia.lawcraft.png");
     eframe::icon_data::from_png_bytes(png).map_err(|e| log::warn!("app icon: {e}")).ok()
 }
 
@@ -394,8 +394,8 @@ fn main() -> eframe::Result {
     }
     let mut options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_title("WordCraft")
-            .with_app_id("ai.storyteller.wordcraft")
+            .with_title("LawCraft")
+            .with_app_id("com.charitonmedia.lawcraft")
             .with_inner_size([1440.0, 920.0])
             .with_min_inner_size([760.0, 480.0])
             .with_drag_and_drop(true)
@@ -437,7 +437,7 @@ fn main() -> eframe::Result {
     #[cfg(target_os = "macos")]
     let apple_events = &apple_events;
     eframe::run_native(
-        "WordCraft",
+        "LawCraft",
         options,
         Box::new(move |cc| {
             // The system region picks the new document's paper, the units and the decimal
@@ -455,6 +455,12 @@ fn main() -> eframe::Result {
             wordcraft_law::set_profiles_dir(if prefs_enabled() { wordcraft_law::settings_dir() } else { None });
             app.add_addin(Box::new(wordcraft_law_ui::LawAddIn::default()));
             load_prefs(&mut app);
+            // LawCraft's tools are on until the user turns them off in File › Options › Add-ins.
+            if !app.session.prefs.modules.contains_key(wordcraft_law::MODULE) {
+                let mut modules = serde_json::Map::new();
+                modules.insert(wordcraft_law::MODULE.into(), true.into());
+                let _ = app.execute("file.options", serde_json::json!({ "modules": modules }));
+            }
             load_user_dictionary(&mut app);
             app.session.update_http = Some(update_check::http_get());
             app.session.update_install = Some(update_install::handoff());

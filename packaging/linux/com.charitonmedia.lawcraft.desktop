@@ -1,14 +1,14 @@
 [Desktop Entry]
 Type=Application
-Name=WordCraft
+Name=LawCraft
 GenericName=Word Processor
 Comment=Write and design documents; open and save Word files
-Exec=wordcraft %F
-TryExec=wordcraft
-Icon=ai.storyteller.wordcraft
+Exec=lawcraft %F
+TryExec=lawcraft
+Icon=com.charitonmedia.lawcraft
 Terminal=false
 StartupNotify=true
-StartupWMClass=ai.storyteller.wordcraft
+StartupWMClass=com.charitonmedia.lawcraft
 Categories=Office;WordProcessor;
 Keywords=word;processor;document;docx;writer;text;letter;report;
 MimeType=application/vnd.openxmlformats-officedocument.wordprocessingml.document;application/vnd.ms-word.document.macroEnabled.12;application/vnd.openxmlformats-officedocument.wordprocessingml.template;application/vnd.ms-word.template.macroEnabled.12;application/msword;application/msword-template;application/vnd.oasis.opendocument.text;application/rtf;text/rtf;text/markdown;text/x-tex;text/html;text/plain;

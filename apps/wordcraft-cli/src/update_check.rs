@@ -22,7 +22,7 @@ pub fn http_get() -> HttpGet {
     Arc::new(|url, max_bytes| {
         let agent: ureq::Agent = ureq::Agent::config_builder()
             .timeout_global(Some(Duration::from_secs(30)))
-            .user_agent(concat!("wordcraft-cli/", env!("CARGO_PKG_VERSION"), " (+https://github.com/storytold/wordcraft)"))
+            .user_agent(concat!("wordcraft-cli/", env!("CARGO_PKG_VERSION"), " (+https://github.com/CharitonMedia/lawcraft)"))
             .build()
             .into();
         let mut response = agent

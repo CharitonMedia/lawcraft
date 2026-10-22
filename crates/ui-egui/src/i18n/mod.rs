@@ -390,7 +390,7 @@ pub fn trc<'a>(lang: Lang, context: &str, s: &'a str) -> &'a str {
     if pseudo::on() {
         return pseudo::mark(s);
     }
-    lang.catalog().in_context(context, s).unwrap_or(s)
+    branded(lang.catalog().in_context(context, s).unwrap_or(s))
 }
 
 /// Lowercase translated interface labels and UI search queries in the current language.
@@ -418,7 +418,31 @@ pub fn tr(lang: Lang, s: &str) -> &str {
     if pseudo::on() {
         return pseudo::mark(s);
     }
-    lang.catalog().plain(s).unwrap_or(s)
+    branded(lang.catalog().plain(s).unwrap_or(s))
+}
+
+/// The app's name in this edition, in place of WordCraft's.
+pub const APP_NAME: &str = "LawCraft";
+
+/// `s` naming this edition ([`APP_NAME`]) where WordCraft's interface text names WordCraft.
+pub fn rebrand(s: &str) -> String {
+    s.replace("WordCraft", APP_NAME)
+}
+
+/// [`rebrand`] for the interface's borrowed strings: each distinct rebranded string is made once
+/// and kept. Tests see the upstream text, so WordCraft's own tests run unchanged.
+fn branded(s: &str) -> &str {
+    if cfg!(test) || !s.contains("WordCraft") {
+        return s;
+    }
+    static MADE: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, &'static str>>> = std::sync::OnceLock::new();
+    let mut made = MADE.get_or_init(Default::default).lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(done) = made.get(s) {
+        return done;
+    }
+    let done: &'static str = Box::leak(rebrand(s).into_boxed_str());
+    made.insert(s.to_string(), done);
+    done
 }
 
 /// A style's name as the interface shows it: built-in styles (`Normal`, `Heading 2`, `TOC 3`) in

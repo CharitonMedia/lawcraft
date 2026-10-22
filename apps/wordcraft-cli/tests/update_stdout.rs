@@ -16,7 +16,7 @@ fn update_check_subprocess_stdout_is_one_json_value() {
     let bin = dir.join("bin");
     fs::create_dir_all(&bin).expect("bin dir");
     let fixture = dir.join("latest.json");
-    fs::write(&fixture, br#"{"tag_name":"v99.0.0","draft":false,"prerelease":false,"body":"Notes","html_url":"https://github.com/storytold/wordcraft/releases/tag/v99.0.0","assets":[]}"#)
+    fs::write(&fixture, br#"{"tag_name":"v99.0.0","draft":false,"prerelease":false,"body":"Notes","html_url":"https://github.com/CharitonMedia/lawcraft/releases/tag/v99.0.0","assets":[]}"#)
         .expect("fixture");
 
     // A probe that would contaminate stdout if its output were inherited; it records that it ran.

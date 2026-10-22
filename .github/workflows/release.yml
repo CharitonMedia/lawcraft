@@ -1,12 +1,14 @@
 name: Release
 
+# A draft GitHub Release with every installer, from a push to the release branch or by hand.
+# Without the signing secrets the builds are unsigned (Windows and macOS warn on install).
 on:
   push:
     branches: [release]
   workflow_dispatch:
     inputs:
       version:
-        description: "Version override for a test run, e.g. 0.2.0-rc.1 (empty: Cargo.toml)"
+        description: "Version override for a test run, e.g. 1.0.0-rc.1 (empty: Cargo.toml)"
         type: string
         default: ""
 
@@ -19,13 +21,16 @@ concurrency:
 
 jobs:
   release:
-    # Intentionally tracked at @main (not SHA-pinned) so org-wide CI improvements, security fixes, and build optimizations propagate without PR churn across all craftapp repos.
-    uses: storytold/craft-common-actions/.github/workflows/release.yml@main
+    uses: ./.github/workflows/build-release.yml
     with:
       app-name: wordcraft
-      app-title: WordCraft
+      app-title: LawCraft
       craft-fonts-ref: 8dcdacd5153e64560d109541a47d806f26f048c0
       version: ${{ inputs.version }}
+      has-web: false
+      has-riscv64: false
+      has-freebsd: false
+      has-arch: false
     secrets:
       APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
       APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}

@@ -312,7 +312,7 @@ mod tests {
     /// A latest-release JSON that lists the checksum file and the asset for `kind`.
     fn latest_for(asset: &str) -> String {
         format!(
-            r#"{{"tag_name":"v9.0.0","draft":false,"prerelease":false,"body":"Hi","html_url":"https://github.com/storytold/wordcraft/releases/tag/v9.0.0","assets":[{{"name":"SHA256SUMS.txt","browser_download_url":"https://example.com/sums"}},{{"name":"{asset}","browser_download_url":"https://example.com/pkg"}}]}}"#
+            r#"{{"tag_name":"v9.0.0","draft":false,"prerelease":false,"body":"Hi","html_url":"https://github.com/CharitonMedia/lawcraft/releases/tag/v9.0.0","assets":[{{"name":"SHA256SUMS.txt","browser_download_url":"https://example.com/sums"}},{{"name":"{asset}","browser_download_url":"https://example.com/pkg"}}]}}"#
         )
     }
 
@@ -363,7 +363,7 @@ mod tests {
 
     /// A latest-release JSON offering the 9.0.0 `.deb` for `arch`.
     fn latest_linux_deb(arch: &str) -> String {
-        latest_for(&format!("wordcraft-9.0.0-linux-{arch}.deb"))
+        latest_for(&format!("lawcraft-9.0.0-linux-{arch}.deb"))
     }
 
     /// The running version as the latest release: up to date.
@@ -461,7 +461,7 @@ mod tests {
     #[test]
     fn checksum_mismatch_refused() {
         let latest = latest_linux_deb("x86_64");
-        let sums = b"0000000000000000000000000000000000000000000000000000000000000000  wordcraft-9.0.0-linux-x86_64.deb\n";
+        let sums = b"0000000000000000000000000000000000000000000000000000000000000000  lawcraft-9.0.0-linux-x86_64.deb\n";
         let mut s = session_with(Arc::new(move |u, _| {
             Ok(if u.contains("sums") {
                 sums.to_vec()
@@ -488,7 +488,7 @@ mod tests {
             let digest = h.finalize();
             digest.iter().map(|b| format!("{b:02x}")).collect::<String>()
         };
-        let sums = format!("{hash}  wordcraft-9.0.0-linux-x86_64.deb\n");
+        let sums = format!("{hash}  lawcraft-9.0.0-linux-x86_64.deb\n");
         let installed = Arc::new(Mutex::new(false));
         let got = Arc::clone(&installed);
         let mut s = session_with(Arc::new(move |u, max| {
@@ -642,7 +642,7 @@ mod tests {
         let (r, got) = apply_for_arch(InstallKind::LinuxDeb, arch);
         assert_eq!(r["status"], "available");
         let h = got.unwrap();
-        assert_eq!(h.file_name, format!("wordcraft-9.0.0-linux-{arch}.deb"));
+        assert_eq!(h.file_name, format!("lawcraft-9.0.0-linux-{arch}.deb"));
     }
 
     /// The x64 MSI is chosen from the release arch, whatever the host is.
@@ -651,7 +651,7 @@ mod tests {
         let (r, got) = apply_for_arch(InstallKind::WindowsMsi, "x64");
         assert_eq!(r["status"], "available");
         let h = got.unwrap();
-        assert_eq!(h.file_name, "wordcraft-9.0.0-windows-x64.msi");
+        assert_eq!(h.file_name, "lawcraft-9.0.0-windows-x64.msi");
     }
 
     /// MSI return code 3010 (installed, restart required) must count as success and be reported,

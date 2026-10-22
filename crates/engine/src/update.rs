@@ -11,9 +11,12 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 
 /// GitHub API for the latest published WordCraft release.
-pub const LATEST_API: &str = "https://api.github.com/repos/storytold/wordcraft/releases/latest";
+pub const LATEST_API: &str = "https://api.github.com/repos/CharitonMedia/lawcraft/releases/latest";
 /// Every browser link the UI opens stays under this prefix.
-pub const RELEASES_PAGE: &str = "https://github.com/storytold/wordcraft/releases/";
+/// The release assets' name prefix (`lawcraft-<version>-linux-x86_64.deb`).
+pub const ASSET_PREFIX: &str = "lawcraft";
+
+pub const RELEASES_PAGE: &str = "https://github.com/CharitonMedia/lawcraft/releases/";
 pub const CHECKSUMS_NAME: &str = "SHA256SUMS.txt";
 /// At most one automatic check per day.
 pub const INTERVAL_SECS: u64 = 24 * 60 * 60;
@@ -135,7 +138,10 @@ pub fn detect_install_kind(exe: &str, env: &dyn EnvRead) -> InstallKind {
 
 /// Is `lower_exe` (lowercased) in a system location a `.deb` package installs to?
 fn linux_system_install_path(lower_exe: &str) -> bool {
-    lower_exe.starts_with("/usr/bin/") || lower_exe.starts_with("/usr/local/bin/") || lower_exe.contains("/opt/wordcraft/")
+    lower_exe.starts_with("/usr/bin/")
+        || lower_exe.starts_with("/usr/local/bin/")
+        || lower_exe.contains("/opt/wordcraft/")
+        || lower_exe.contains("/opt/lawcraft/")
 }
 
 /// macOS installs only get a verified download from the system `/Applications` bundle; a copy in
@@ -490,10 +496,10 @@ pub fn skipped(release: &ReleaseInfo, skipped: &str) -> bool {
 pub fn asset_name(version: Version, kind: InstallKind, arch: &str) -> Option<String> {
     let v = version_text(version);
     match kind {
-        InstallKind::WindowsMsi => Some(format!("wordcraft-{v}-windows-{arch}.msi")),
-        InstallKind::WindowsPortableZip => Some(format!("wordcraft-{v}-windows-{arch}-portable.zip")),
-        InstallKind::MacDmg | InstallKind::MacApp => Some(format!("wordcraft-{v}-macos-universal.dmg")),
-        InstallKind::LinuxDeb => Some(format!("wordcraft-{v}-linux-{arch}.deb")),
+        InstallKind::WindowsMsi => Some(format!("{ASSET_PREFIX}-{v}-windows-{arch}.msi")),
+        InstallKind::WindowsPortableZip => Some(format!("{ASSET_PREFIX}-{v}-windows-{arch}-portable.zip")),
+        InstallKind::MacDmg | InstallKind::MacApp => Some(format!("{ASSET_PREFIX}-{v}-macos-universal.dmg")),
+        InstallKind::LinuxDeb => Some(format!("{ASSET_PREFIX}-{v}-linux-{arch}.deb")),
         InstallKind::Flatpak | InstallKind::AppImage | InstallKind::Unknown => None,
     }
 }
@@ -776,7 +782,7 @@ mod tests {
     #[test]
     fn asset_names_per_kind() {
         let v = (0, 6, 1);
-        assert_eq!(asset_name(v, InstallKind::LinuxDeb, "x86_64").as_deref(), Some("wordcraft-0.6.1-linux-x86_64.deb"));
+        assert_eq!(asset_name(v, InstallKind::LinuxDeb, "x86_64").as_deref(), Some("lawcraft-0.6.1-linux-x86_64.deb"));
         // Arches without a release keep their own name, so they never pick another arch's build.
         for (arch, windows, want) in [
             ("x86_64", false, "x86_64"),
@@ -791,18 +797,18 @@ mod tests {
         ] {
             assert_eq!(release_arch_label(arch, windows), want, "{arch} windows={windows}");
         }
-        assert_eq!(asset_name(v, InstallKind::LinuxDeb, "riscv64").as_deref(), Some("wordcraft-0.6.1-linux-riscv64.deb"));
-        assert_eq!(asset_name(v, InstallKind::LinuxDeb, "aarch64").as_deref(), Some("wordcraft-0.6.1-linux-aarch64.deb"));
-        assert_eq!(asset_name(v, InstallKind::WindowsMsi, "x64").as_deref(), Some("wordcraft-0.6.1-windows-x64.msi"));
+        assert_eq!(asset_name(v, InstallKind::LinuxDeb, "riscv64").as_deref(), Some("lawcraft-0.6.1-linux-riscv64.deb"));
+        assert_eq!(asset_name(v, InstallKind::LinuxDeb, "aarch64").as_deref(), Some("lawcraft-0.6.1-linux-aarch64.deb"));
+        assert_eq!(asset_name(v, InstallKind::WindowsMsi, "x64").as_deref(), Some("lawcraft-0.6.1-windows-x64.msi"));
         assert!(asset_name(v, InstallKind::Unknown, "x86_64").is_none());
-        assert_eq!(pick_asset_name_with_arch(v, InstallKind::LinuxDeb, "aarch64").as_deref(), Some("wordcraft-0.6.1-linux-aarch64.deb"));
+        assert_eq!(pick_asset_name_with_arch(v, InstallKind::LinuxDeb, "aarch64").as_deref(), Some("lawcraft-0.6.1-linux-aarch64.deb"));
         assert_eq!(pick_asset_name(v, InstallKind::LinuxDeb).as_deref(), asset_name(v, InstallKind::LinuxDeb, host_release_arch()).as_deref());
     }
 
     /// A newer release is offered, the running version is not, and a skipped version is recognised.
     #[test]
     fn versions_and_offers() {
-        let json = br#"{"tag_name":"v0.7.0","draft":false,"prerelease":false,"body":"Notes","html_url":"https://github.com/storytold/wordcraft/releases/tag/v0.7.0","assets":[]}"#;
+        let json = br#"{"tag_name":"v0.7.0","draft":false,"prerelease":false,"body":"Notes","html_url":"https://github.com/CharitonMedia/lawcraft/releases/tag/v0.7.0","assets":[]}"#;
         let cur = (0, 6, 1);
         let r = parse_latest_release(json, cur).unwrap().unwrap();
         assert_eq!(r.version, (0, 7, 0));
@@ -826,8 +832,8 @@ mod tests {
     #[test]
     fn checksum_verify_and_refuse_mismatch() {
         let data = b"hello";
-        let sums = b"2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824  wordcraft-0.6.1-linux-x86_64.deb\n";
-        let hash = checksum_for(sums, "wordcraft-0.6.1-linux-x86_64.deb").unwrap().unwrap();
+        let sums = b"2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824  lawcraft-0.6.1-linux-x86_64.deb\n";
+        let hash = checksum_for(sums, "lawcraft-0.6.1-linux-x86_64.deb").unwrap().unwrap();
         assert!(verify_sha256(data, &hash));
         assert!(!verify_sha256(b"bye", &hash));
         assert!(checksum_for(sums, "missing.deb").unwrap().is_none());
@@ -844,10 +850,10 @@ mod tests {
     #[test]
     fn each_install_kind_picks_an_asset_name() {
         let v = (0, 7, 0);
-        assert_eq!(asset_name(v, InstallKind::WindowsMsi, "x64").as_deref(), Some("wordcraft-0.7.0-windows-x64.msi"));
-        assert_eq!(asset_name(v, InstallKind::WindowsPortableZip, "arm64").as_deref(), Some("wordcraft-0.7.0-windows-arm64-portable.zip"));
-        assert_eq!(asset_name(v, InstallKind::MacDmg, "x86_64").as_deref(), Some("wordcraft-0.7.0-macos-universal.dmg"));
-        assert_eq!(asset_name(v, InstallKind::MacApp, "aarch64").as_deref(), Some("wordcraft-0.7.0-macos-universal.dmg"));
+        assert_eq!(asset_name(v, InstallKind::WindowsMsi, "x64").as_deref(), Some("lawcraft-0.7.0-windows-x64.msi"));
+        assert_eq!(asset_name(v, InstallKind::WindowsPortableZip, "arm64").as_deref(), Some("lawcraft-0.7.0-windows-arm64-portable.zip"));
+        assert_eq!(asset_name(v, InstallKind::MacDmg, "x86_64").as_deref(), Some("lawcraft-0.7.0-macos-universal.dmg"));
+        assert_eq!(asset_name(v, InstallKind::MacApp, "aarch64").as_deref(), Some("lawcraft-0.7.0-macos-universal.dmg"));
     }
 
     /// The regression for the CLI-JSON contamination: a probe's output must land in the returned

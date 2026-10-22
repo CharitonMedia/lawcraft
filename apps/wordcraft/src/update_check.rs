@@ -35,7 +35,7 @@ fn fetch_url(url: &str, max_bytes: usize) -> Result<Vec<u8>, String> {
         .timeout_send_request(Some(CONNECT))
         .timeout_recv_response(Some(CONNECT))
         .timeout_recv_body(Some(BACKSTOP))
-        .user_agent(concat!("WordCraft/", env!("CARGO_PKG_VERSION"), " (+https://github.com/storytold/wordcraft)"))
+        .user_agent(concat!("LawCraft/", env!("CARGO_PKG_VERSION"), " (+https://github.com/CharitonMedia/lawcraft)"))
         .build()
         .into();
     let response = agent

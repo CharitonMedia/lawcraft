@@ -184,20 +184,20 @@ fn listed_text(doc: &wordcraft_doc::Document) -> Result<String, String> {
     Ok(String::from_utf8_lossy(&bytes).replace("\r\n", "\n"))
 }
 
-/// Whether the LawCraft module (`law.*` commands) is on: the user's setting (`law.enabled` in the
-/// saved preferences, the same one the app writes), or `WORDCRAFT_LAW=1` for one headless run.
-/// Off by default; a run that saves no preferences (`WORDCRAFT_NO_PREFS`) only takes the flag.
+/// Whether the LawCraft module (`law.*` commands) is on: `WORDCRAFT_LAW` for one run (`0` turns it
+/// off), else the user's setting (`modules.law` in the saved preferences, the one the app writes).
+/// On by default in LawCraft.
 fn law_enabled() -> bool {
-    if std::env::var_os("WORDCRAFT_LAW").is_some_and(|v| !v.is_empty() && v != "0") {
-        return true;
+    if let Some(v) = std::env::var_os("WORDCRAFT_LAW") {
+        return !v.is_empty() && v != "0";
     }
     if std::env::var_os("WORDCRAFT_NO_PREFS").is_some() {
-        return false;
+        return true;
     }
-    let Some(dir) = wordcraft_control_key::settings_dir() else { return false };
-    let Ok(bytes) = std::fs::read(dir.join("ui.json")) else { return false };
-    let Ok(saved) = serde_json::from_slice::<serde_json::Value>(&bytes) else { return false };
-    saved.pointer("/editing/modules/law").and_then(serde_json::Value::as_bool) == Some(true)
+    let Some(dir) = wordcraft_control_key::settings_dir() else { return true };
+    let Ok(bytes) = std::fs::read(dir.join("ui.json")) else { return true };
+    let Ok(saved) = serde_json::from_slice::<serde_json::Value>(&bytes) else { return true };
+    saved.pointer("/editing/modules/law").and_then(serde_json::Value::as_bool) != Some(false)
 }
 
 /// Turn the LawCraft module on for a headless session, when it is on.

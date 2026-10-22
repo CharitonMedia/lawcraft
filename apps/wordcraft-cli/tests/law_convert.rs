@@ -9,7 +9,8 @@ fn cli(args: &[&str], law: bool, home: &std::path::Path) -> Output {
     if law {
         c.env("WORDCRAFT_LAW", "1");
     } else {
-        c.env_remove("WORDCRAFT_LAW");
+        // LawCraft has the legal tools on by default; `0` turns them off for the run.
+        c.env("WORDCRAFT_LAW", "0");
     }
     c.output().unwrap()
 }

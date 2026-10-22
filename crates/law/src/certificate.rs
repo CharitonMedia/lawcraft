@@ -14,7 +14,7 @@ use crate::store::LawError;
 /// Field instruction for the live word count (updated on field rebuild and before export).
 pub const FIELD_WORDCOUNT: &str = "LAWWORDCOUNT";
 
-const SOFTWARE: &str = "WordCraft";
+const SOFTWARE: &str = "LawCraft";
 
 /// Missouri appellate brief certificate (Rule 84.06(c)); placeholders filled at insert time.
 const MO_TEMPLATE: &str = "I certify that this brief contains {wordCount} words, excluding the portions of the brief exempted by Rule 84.04, does not exceed the word limit of {wordLimit} words, and complies with the type-volume requirements of Supreme Court Rule 55.03. The brief is set in {font} {fontSize}-point type and was prepared with {software}.";
