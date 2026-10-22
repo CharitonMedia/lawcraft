@@ -56,8 +56,8 @@ fn is_open(a: &WordApp) -> bool {
 fn fill(f: &mut PleadingForm) {
     f.county = "ADAIR".into();
     f.case_number = "26AR-DR00012".into();
-    f.first_names = "JANE DOE".into();
-    f.second_names = "JOHN DOE".into();
+    f.first.parties[0].name = "JANE DOE".into();
+    f.second.parties[0].name = "JOHN DOE".into();
     f.filing_date = "2026-10-15".into();
     f.firm = firm_from(&json!({
         "firmName": "Nolan Law Firm LLC", "address1": "101 Main St", "city": "Kirksville", "state": "MO", "zip": "63501",
@@ -100,12 +100,27 @@ fn create_stays_disabled_until_the_required_fields_are_set() {
     fill(form(h.state_mut()));
     h.run_steps(2);
     assert!(!create_disabled(&h));
-    form(h.state_mut()).usps = true;
+    let params = form(h.state_mut()).params();
+    assert_eq!(params["firstSide"]["names"], json!([{"name": "JANE DOE", "client": true}]), "the first party starts as our client");
+    assert_eq!(params["secondSide"]["names"], json!([{"name": "JOHN DOE", "client": false}]));
+    form(h.state_mut()).first.parties[0].client = false;
     h.run_steps(2);
-    assert!(create_disabled(&h), "USPS service needs the party");
-    assert!(h.query_by_label("Fill in Party name to create.").is_some());
+    assert!(create_disabled(&h), "someone has to be our client");
+    assert!(h.query_by_label("Tick Client beside a party we represent to create.").is_some());
     let f = form(h.state_mut());
-    f.usps = false;
+    f.first.parties[0].client = true;
+    f.second.parties[0].pro_se = true;
+    h.run_steps(2);
+    assert!(create_disabled(&h), "a pro se party needs a mailing address");
+    assert!(h.query_by_label("Fill in the mailing address for JOHN DOE to create.").is_some());
+    let f = form(h.state_mut());
+    f.second.parties[0].address = "1 Elm Street\nMacon, MO 63552".into();
+    let params = f.params();
+    assert_eq!(params["secondSide"]["names"][0]["address"], "1 Elm Street, Macon, MO 63552", "one line");
+    h.run_steps(2);
+    assert!(!create_disabled(&h));
+    let f = form(h.state_mut());
+    f.second.parties[0].pro_se = false;
     f.filing_date.clear();
     h.run_steps(2);
     assert!(create_disabled(&h), "the filing date is required");

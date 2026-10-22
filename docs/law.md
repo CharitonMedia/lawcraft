@@ -190,10 +190,11 @@ nothing else happens). With params it writes:
   "courtType": "CIRCUIT",
   "county": "ADAIR",
   "caseNumber": "26AR-DR00001",
-  "firstSide": {"names": ["JANE DOE"], "role": "Petitioner"},
-  "secondSide": {"names": ["JOHN DOE"], "role": "Respondent"},
-  "weRepresent": "first",
-  "service": "efileCounsel",
+  "firstSide": {"names": [{"name": "JANE DOE", "client": true}], "role": "Petitioner"},
+  "secondSide": {
+    "names": ["JOHN DOE", {"name": "JIM DOE", "proSe": true, "address": "1 Elm Street, Macon, MO 63552"}],
+    "role": "Respondent"
+  },
   "filingDate": "2026-10-15"
 }
 ```
@@ -203,10 +204,19 @@ nothing else happens). With params it writes:
   page numbers bottom centre, and the styles `Body`, `Numbered`, `Title`, `Court`, `Court State`,
   `Caption`, `Signature`, `Certificate Heading`, `Certificate`).
 - `courtType` defaults to `CIRCUIT`; `caseNumber` may be empty for a petition (`Case No.
-  ____________`). `weRepresent` picks the client side the body and signature speak for.
-- `service` (not for a petition): `efileCounsel`, or `efileUsps` with `servedParty` and
-  `servedAddress` for the mailed copy. `filingDate` (the certificate's date, written as `15th day
-  of October, 2026`) defaults to today's date in UTC.
+  ____________`).
+- Each side's `names` are strings or `{"name", "client"?, "proSe"?, "address"?}`. `client: true`
+  marks the parties the firm represents, one or more, all on one side; the body speaks for them,
+  and the signature reads `Attorney for Respondent`, or `Attorney for Respondents JIM DOE and JOE
+  DOE` when the firm represents only some of its side. The usual roles (Petitioner, Plaintiff,
+  Respondent, Defendant) go plural for more than one party; a role typed in stays as typed. Older
+  callers may give `weRepresent: "first|second"` instead, which marks everyone on that side.
+- Service (not for a petition): one line e-files the foregoing to counsel of record, for every
+  party with counsel. Each `proSe` party (which needs an `address`) gets its own sentence: a copy
+  sent postage pre-paid via USPS to that address. With every other party pro se, the certificate
+  is the mailing alone. The older `service: "efileUsps"` with `servedParty` and `servedAddress`
+  still adds one mailed party. `filingDate` (the certificate's date, written as `15th day of
+  October, 2026`) defaults to today's date in UTC.
 - `verified: true` (petition only) adds the verification and notary jurat.
 - `firm`: `firmName`, `address1`, `address2`?, `city`, `state`, `zip`, `phone`, `fax`?, `email`,
   `attorneyName`, `barNumber`; left out, the saved firm details are used.

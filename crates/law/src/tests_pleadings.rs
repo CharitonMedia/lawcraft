@@ -10,7 +10,7 @@ use wordcraft_engine::{CmdError, Session};
 
 use super::tests::{err, law, run};
 use crate::cmd::store;
-use crate::pleadings::{NOT_BLANK, PROFILE, join_names, long_date};
+use crate::pleadings::{NOT_BLANK, PROFILE, join_names, long_date, plural_role};
 use crate::{MODULE, install};
 
 fn firm() -> Value {
@@ -193,7 +193,10 @@ fn several_parties_are_listed_and_joined() {
     let text = paras(&s.doc);
     let jane = text.iter().position(|t| t == "JANE DOE").expect("first name");
     assert_eq!(text.get(jane + 1).map(String::as_str), Some("JIM DOE"), "one line each");
-    assert!(text.iter().any(|t| t.starts_with("COMES NOW JANE DOE and JIM DOE, Petitioner,")), "{text:?}");
+    assert!(text.iter().any(|t| t.starts_with("COMES NOW JANE DOE and JIM DOE, Petitioners,")), "{text:?}");
+    assert!(text.iter().any(|t| t == "Petitioners,"), "the caption's role is plural too");
+    assert!(text.iter().any(|t| t.starts_with("WHEREFORE, Petitioners pray this Court")), "{text:?}");
+    assert!(text.iter().any(|t| t == "Attorney for Petitioners"), "{text:?}");
     let three = ["A".to_string(), "B".to_string(), "C".to_string()];
     assert_eq!(join_names(&three), "A, B, and C");
     assert_eq!(join_names(&three[..2]), "A and B");
@@ -416,4 +419,63 @@ fn a_match_style_must_name_a_style() {
     }
     let problems = crate::profile::problems(&p);
     assert!(problems.iter().any(|m| m.contains("matchStyle `Nope`")), "{problems:?}");
+}
+
+#[test]
+fn the_firm_can_represent_some_of_the_parties_on_either_side() {
+    let mut v = motion();
+    v.as_object_mut().expect("params").remove("weRepresent");
+    v["firstSide"]["names"] = json!(["JANE DOE"]);
+    v["secondSide"] =
+        json!({"names": [{"name": "JOHN DOE"}, {"name": "JIM DOE", "client": true}, {"name": "JOE DOE", "client": true}], "role": "Respondent"});
+    let (s, _) = pleading(v.clone());
+    let text = paras(&s.doc);
+    assert!(text.iter().any(|t| t == "Respondents."), "{text:?}");
+    assert!(text.iter().any(|t| t.starts_with("COMES NOW JIM DOE and JOE DOE, Respondents, by and through counsel")), "{text:?}");
+    assert!(text.iter().any(|t| t.starts_with("WHEREFORE, Respondents pray this Court")), "{text:?}");
+    assert!(text.iter().any(|t| t == "Attorney for Respondents JIM DOE and JOE DOE"), "only some of the side: named");
+    // Clients on both sides are refused, as is a client marked pro se.
+    let mut both = v.clone();
+    both["firstSide"]["names"] = json!([{"name": "JANE DOE", "client": true}]);
+    let mut s = law();
+    assert!(err(&mut s, "law.pleadings.new", both).to_string().contains("one side"));
+    let mut odd = v.clone();
+    odd["secondSide"]["names"][1]["proSe"] = json!(true);
+    let mut s = law();
+    assert!(err(&mut s, "law.pleadings.new", odd).to_string().contains("pro se"));
+    // No client at all (and no weRepresent) is refused.
+    let mut none = v;
+    none["secondSide"]["names"] = json!(["JOHN DOE"]);
+    let mut s = law();
+    assert!(err(&mut s, "law.pleadings.new", none).to_string().contains("client"));
+}
+
+#[test]
+fn pro_se_parties_are_mailed_and_counsel_e_filed() {
+    let mut v = motion();
+    v.as_object_mut().expect("params").remove("service");
+    v["secondSide"]["names"] = json!(["JOHN DOE", {"name": "JIM DOE", "proSe": true, "address": "1 Elm Street\nMacon, MO 63552"}]);
+    let (s, _) = pleading(v.clone());
+    let want = "I hereby certify that on this 15th day of October, 2026, an electronic copy of the foregoing was sent through the Missouri e-Filing system to counsel of record. A copy of this Motion for Withdrawal of Attorney was sent to JIM DOE postage pre-paid via USPS to last known address of 1 Elm Street, Macon, MO 63552, on today's date.";
+    assert!(paras(&s.doc).iter().any(|t| t == want), "{:?}", paras(&s.doc));
+    // Everyone else pro se: no counsel to e-file to, the mailing alone.
+    let mut alone = v.clone();
+    alone["secondSide"]["names"] = json!([{"name": "JOHN DOE", "proSe": true, "address": "2 Oak Street, Macon, MO 63552"}]);
+    let (s, _) = pleading(alone);
+    let want = "I hereby certify that on this 15th day of October, 2026, a copy of this Motion for Withdrawal of Attorney was sent to JOHN DOE postage pre-paid via USPS to last known address of 2 Oak Street, Macon, MO 63552.";
+    assert!(paras(&s.doc).iter().any(|t| t == want), "{:?}", paras(&s.doc));
+    // A pro se party needs an address.
+    let mut bare = v;
+    bare["secondSide"]["names"][1].as_object_mut().expect("party").remove("address");
+    let mut s = law();
+    let e = err(&mut s, "law.pleadings.new", bare);
+    assert!(matches!(&e, CmdError::Params(m) if m.contains("address") && m.contains("JIM DOE")), "{e}");
+}
+
+#[test]
+fn usual_roles_take_a_plural_and_typed_ones_stay() {
+    assert_eq!(plural_role("Petitioner", 1), "Petitioner");
+    assert_eq!(plural_role("Defendant", 2), "Defendants");
+    assert_eq!(plural_role("PLAINTIFF", 3), "PLAINTIFFS");
+    assert_eq!(plural_role("Guardian ad Litem", 2), "Guardian ad Litem");
 }

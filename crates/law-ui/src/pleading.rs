@@ -71,6 +71,63 @@ fn firm_fields(ui: &mut Ui, f: &mut Firm, salt: &str) -> bool {
 const TYPES: [(&str, &str, &str); 4] =
     [("motion", "Motion", "Motion"), ("notice", "Notice", "Notice of Hearing"), ("answer", "Answer", "Answer"), ("petition", "Petition", "Petition")];
 
+/// The roles each side offers before Other, which takes a typed role.
+const FIRST_ROLES: [&str; 2] = ["Petitioner", "Plaintiff"];
+const SECOND_ROLES: [&str; 2] = ["Respondent", "Defendant"];
+
+/// Most names on one side (the command's limit).
+const MAX_NAMES: usize = 20;
+
+/// One party on a side, as typed.
+#[derive(Clone, Debug, Default)]
+pub struct PartyRow {
+    pub name: String,
+    /// We represent this party.
+    pub client: bool,
+    /// No counsel: served by USPS at `address`.
+    pub pro_se: bool,
+    pub address: String,
+}
+
+/// One side of the caption: its parties and their role.
+#[derive(Clone, Debug)]
+pub struct SideForm {
+    pub parties: Vec<PartyRow>,
+    /// A role from the list, or what was typed for Other.
+    pub role: String,
+    /// The role is Other, typed in.
+    pub other: bool,
+}
+
+impl SideForm {
+    /// One empty party, ticked as our client or not, in `role`.
+    fn new(role: &str, client: bool) -> Self {
+        Self { parties: vec![PartyRow { client, ..Default::default() }], role: role.into(), other: false }
+    }
+
+    /// The parties with a name.
+    fn filled(&self) -> impl Iterator<Item = &PartyRow> {
+        self.parties.iter().filter(|p| !p.name.trim().is_empty())
+    }
+
+    /// The side as `law.pleadings.new` takes it. A petition is served with the summons, so
+    /// pro se parties get no mailing there.
+    fn json(&self, petition: bool) -> Value {
+        let list: Vec<Value> = self
+            .filled()
+            .map(|p| {
+                let mut o = json!({"name": p.name.trim(), "client": p.client});
+                if p.pro_se && !p.client && !petition {
+                    o["proSe"] = json!(true);
+                    o["address"] = json!(names(&p.address).join(", "));
+                }
+                o
+            })
+            .collect();
+        json!({"names": list, "role": self.role.trim()})
+    }
+}
+
 /// What the New Pleading window holds while it is open.
 #[derive(Clone, Debug)]
 pub struct PleadingForm {
@@ -80,17 +137,8 @@ pub struct PleadingForm {
     pub court_type: String,
     pub county: String,
     pub case_number: String,
-    /// One name per line.
-    pub first_names: String,
-    pub first_role: String,
-    /// One name per line.
-    pub second_names: String,
-    pub second_role: String,
-    pub represent_first: bool,
-    /// Service by e-file and USPS to a party (else e-file to counsel of record).
-    pub usps: bool,
-    pub served_party: String,
-    pub served_address: String,
+    pub first: SideForm,
+    pub second: SideForm,
     /// `YYYY-MM-DD`, prefilled with today so the person sees it and can correct it.
     pub filing_date: String,
     /// Petition only.
@@ -116,14 +164,8 @@ impl Default for PleadingForm {
             court_type: "CIRCUIT".into(),
             county: String::new(),
             case_number: String::new(),
-            first_names: String::new(),
-            first_role: "Petitioner".into(),
-            second_names: String::new(),
-            second_role: "Respondent".into(),
-            represent_first: true,
-            usps: false,
-            served_party: String::new(),
-            served_address: String::new(),
+            first: SideForm::new("Petitioner", true),
+            second: SideForm::new("Respondent", false),
             filing_date: today(),
             verified: false,
             firm: Firm::default(),
@@ -154,35 +196,38 @@ impl PleadingForm {
         self.kind == "petition"
     }
 
-    /// The first required field that is empty (Create waits for it).
-    pub fn missing(&self) -> Option<&'static str> {
-        let fields = [
-            (&self.title, "Title"),
-            (&self.court_type, "Court type"),
-            (&self.county, "County"),
-            (&self.first_names, "First side names"),
-            (&self.first_role, "First side role"),
-            (&self.second_names, "Second side names"),
-            (&self.second_role, "Second side role"),
-        ];
-        if let Some((_, label)) = fields.iter().find(|(v, _)| v.trim().is_empty()) {
-            return Some(label);
+    /// Why Create has to wait, naming the first thing missing.
+    pub fn missing(&self) -> Option<String> {
+        let fill = |label: &str| Some(format!("Fill in {label} to create."));
+        for (value, label) in [(&self.title, "Title"), (&self.court_type, "Court type"), (&self.county, "County")] {
+            if value.trim().is_empty() {
+                return fill(label);
+            }
+        }
+        for (side, which) in [(&self.first, "First side"), (&self.second, "Second side")] {
+            if side.filled().next().is_none() {
+                return fill(&format!("{which} names"));
+            }
+            if side.role.trim().is_empty() {
+                return fill(&format!("{which} role"));
+            }
+        }
+        if !self.first.filled().chain(self.second.filled()).any(|p| p.client) {
+            return Some("Tick Client beside a party we represent to create.".into());
         }
         if self.filing_date.trim().is_empty() {
-            return Some("Filing date");
+            return fill("Filing date");
         }
-        if !self.petition() && self.case_number.trim().is_empty() {
-            return Some("Case No.");
-        }
-        if !self.petition() && self.usps {
-            if self.served_party.trim().is_empty() {
-                return Some("Party name");
+        if !self.petition() {
+            if self.case_number.trim().is_empty() {
+                return fill("Case No.");
             }
-            if self.served_address.trim().is_empty() {
-                return Some("Address");
+            let unaddressed = self.first.filled().chain(self.second.filled()).find(|p| p.pro_se && !p.client && p.address.trim().is_empty());
+            if let Some(p) = unaddressed {
+                return Some(format!("Fill in the mailing address for {} to create.", p.name.trim()));
             }
         }
-        firm_missing(&self.firm)
+        firm_missing(&self.firm).map(|label| format!("Fill in {label} to create."))
     }
 
     /// The params of `law.pleadings.new`.
@@ -193,21 +238,13 @@ impl PleadingForm {
             "courtType": self.court_type.trim(),
             "county": self.county.trim(),
             "caseNumber": self.case_number.trim(),
-            "firstSide": {"names": names(&self.first_names), "role": self.first_role.trim()},
-            "secondSide": {"names": names(&self.second_names), "role": self.second_role.trim()},
-            "weRepresent": if self.represent_first { "first" } else { "second" },
-            "service": if self.usps && !self.petition() { "efileUsps" } else { "efileCounsel" },
+            "firstSide": self.first.json(self.petition()),
+            "secondSide": self.second.json(self.petition()),
             "filingDate": self.filing_date.trim(),
             "firm": firm_json(&self.firm),
         });
-        if let Some(o) = p.as_object_mut() {
-            if self.usps && !self.petition() {
-                o.insert("servedParty".into(), json!(self.served_party.trim()));
-                o.insert("servedAddress".into(), json!(self.served_address.trim()));
-            }
-            if self.petition() {
-                o.insert("verified".into(), json!(self.verified));
-            }
+        if self.petition() {
+            p["verified"] = json!(self.verified);
         }
         p
     }
@@ -254,8 +291,8 @@ pub(crate) fn show(app: &mut Ctx<'_>, ctx: &egui::Context) {
                 ui.colored_label(ui.visuals().error_fg_color, e);
             }
             let missing = form.missing();
-            if let Some(label) = missing {
-                ui.label(RichText::new(format!("Fill in {label} to create.")).small().weak());
+            if let Some(why) = &missing {
+                ui.label(RichText::new(why).small().weak());
             }
             ui.add_space(6.0);
             ui.horizontal(|ui| {
@@ -281,11 +318,6 @@ fn form_ui(ui: &mut Ui, form: &mut PleadingForm) {
         ui.add(egui::TextEdit::singleline(value).desired_width(260.0)).labelled_by(l.id);
         ui.end_row();
     };
-    let lines = |ui: &mut Ui, label: &str, value: &mut String| {
-        let l = ui.label(label);
-        ui.add(egui::TextEdit::multiline(value).desired_rows(2).desired_width(260.0)).labelled_by(l.id);
-        ui.end_row();
-    };
     egui::Grid::new("law_pleading_form").num_columns(2).spacing([8.0, 4.0]).show(ui, |ui| {
         ui.label("Type");
         ui.horizontal(|ui| {
@@ -301,32 +333,21 @@ fn form_ui(ui: &mut Ui, form: &mut PleadingForm) {
         field(ui, "Court type", &mut form.court_type);
         field(ui, "County", &mut form.county);
         field(ui, "Case No.", &mut form.case_number);
-        lines(ui, "First side names (one per line)", &mut form.first_names);
-        field(ui, "First side role", &mut form.first_role);
-        lines(ui, "Second side names (one per line)", &mut form.second_names);
-        field(ui, "Second side role", &mut form.second_role);
-        ui.label("We represent");
-        ui.horizontal(|ui| {
-            ui.radio_value(&mut form.represent_first, true, "First side");
-            ui.radio_value(&mut form.represent_first, false, "Second side");
-        });
-        ui.end_row();
-        if form.kind != "petition" {
-            ui.label("Service");
-            ui.vertical(|ui| {
-                ui.radio_value(&mut form.usps, false, "E-file to counsel of record");
-                ui.radio_value(&mut form.usps, true, "E-file and USPS to a party");
-            });
-            ui.end_row();
-            if form.usps {
-                field(ui, "Party name", &mut form.served_party);
-                lines(ui, "Address", &mut form.served_address);
-            }
-        }
+    });
+    let petition = form.kind == "petition";
+    // Our clients are all on one side: ticking Client on one side clears the other's.
+    if side_ui(ui, "First side", &FIRST_ROLES, &mut form.first, petition, "law_side_first") {
+        form.second.parties.iter_mut().for_each(|p| p.client = false);
+    }
+    if side_ui(ui, "Second side", &SECOND_ROLES, &mut form.second, petition, "law_side_second") {
+        form.first.parties.iter_mut().for_each(|p| p.client = false);
+    }
+    ui.add_space(6.0);
+    egui::Grid::new("law_pleading_form_end").num_columns(2).spacing([8.0, 4.0]).show(ui, |ui| {
         let l = ui.label("Filing date");
         ui.add(egui::TextEdit::singleline(&mut form.filing_date).hint_text("YYYY-MM-DD").desired_width(260.0)).labelled_by(l.id);
         ui.end_row();
-        if form.kind == "petition" {
+        if petition {
             ui.label("");
             ui.checkbox(&mut form.verified, "Verified");
             ui.end_row();
@@ -337,6 +358,72 @@ fn form_ui(ui: &mut Ui, form: &mut PleadingForm) {
         firm_fields(ui, &mut form.firm, "law_pleading_firm");
     });
     ui.checkbox(&mut form.remember_firm, "Remember firm details");
+}
+
+/// One side: its role (from the list, or Other typed in) and its parties, each with Client and,
+/// outside a petition, Pro se with a mailing address. `true` when a Client box was just ticked.
+fn side_ui(ui: &mut Ui, heading: &str, roles: &[&str], side: &mut SideForm, petition: bool, salt: &str) -> bool {
+    let mut ticked = false;
+    ui.add_space(6.0);
+    ui.label(RichText::new(heading).font(semibold(13.0)));
+    ui.push_id(salt, |ui| {
+        ui.horizontal(|ui| {
+            let l = ui.label("Role");
+            let shown = if side.other { "Other".to_string() } else { side.role.clone() };
+            egui::ComboBox::from_id_salt("role")
+                .selected_text(shown)
+                .width(140.0)
+                .show_ui(ui, |ui| {
+                    for role in roles {
+                        if ui.selectable_label(!side.other && side.role == *role, *role).clicked() {
+                            side.role = (*role).to_string();
+                            side.other = false;
+                        }
+                    }
+                    if ui.selectable_label(side.other, "Other").clicked() && !side.other {
+                        side.other = true;
+                        side.role.clear();
+                    }
+                })
+                .response
+                .labelled_by(l.id);
+            if side.other {
+                ui.add(egui::TextEdit::singleline(&mut side.role).hint_text("Role").desired_width(160.0)).labelled_by(l.id);
+            }
+        });
+        let count = side.parties.len();
+        let mut remove = None;
+        for (i, p) in side.parties.iter_mut().enumerate() {
+            ui.push_id(i, |ui| {
+                ui.horizontal(|ui| {
+                    ui.add(egui::TextEdit::singleline(&mut p.name).hint_text("Name").desired_width(220.0));
+                    if ui.checkbox(&mut p.client, "Client").changed() && p.client {
+                        p.pro_se = false;
+                        ticked = true;
+                    }
+                    if !petition {
+                        ui.add_enabled(!p.client, egui::Checkbox::new(&mut p.pro_se, "Pro se"));
+                    }
+                    if count > 1 && ui.small_button("Remove").clicked() {
+                        remove = Some(i);
+                    }
+                });
+                if p.pro_se && !p.client && !petition {
+                    ui.horizontal(|ui| {
+                        ui.add_space(16.0);
+                        ui.add(egui::TextEdit::multiline(&mut p.address).hint_text("Mailing address").desired_rows(2).desired_width(260.0));
+                    });
+                }
+            });
+        }
+        if let Some(i) = remove {
+            side.parties.remove(i);
+        }
+        if side.parties.len() < MAX_NAMES && ui.small_button("Add name").clicked() {
+            side.parties.push(PartyRow::default());
+        }
+    });
+    ticked
 }
 
 /// Create: save the firm details if asked, make sure the document is blank (File › New, with its

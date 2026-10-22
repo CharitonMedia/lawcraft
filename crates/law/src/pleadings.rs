@@ -116,10 +116,27 @@ fn is_blank(doc: &Document) -> bool {
     body && doc.comments.is_empty() && doc.parts.keys().all(|k| doc.plain_text(StoryRef::Part(*k)).trim().is_empty())
 }
 
-/// One side of the case: its parties' names and their role (Plaintiff, Respondent).
+/// One party named in the caption, and how the pleading treats them.
+struct Party {
+    name: String,
+    /// The firm represents this party.
+    client: bool,
+    /// Without counsel: served by USPS at `address`.
+    pro_se: bool,
+    address: Option<String>,
+}
+
+/// One side of the case: its parties and their role (Plaintiff, Respondent).
 struct Side {
-    names: Vec<String>,
+    parties: Vec<Party>,
     role: String,
+}
+
+impl Side {
+    /// Whether the firm represents anyone on this side.
+    fn has_client(&self) -> bool {
+        self.parties.iter().any(|p| p.client)
+    }
 }
 
 /// The params, checked.
@@ -131,9 +148,12 @@ struct Form {
     case_number: String,
     first: Side,
     second: Side,
-    we_first: bool,
-    /// `efileUsps`: the party served by mail and their address.
-    usps: Option<(String, String)>,
+    /// The firm's clients are on the first side.
+    client_first: bool,
+    /// The parties served by USPS: name and mailing address.
+    mail: Vec<(String, String)>,
+    /// Some party the firm doesn't represent has counsel, served through e-filing.
+    counsel: bool,
     date: (i64, u32, u32),
     verified: bool,
     firm: BTreeMap<String, String>,
@@ -147,20 +167,45 @@ impl Form {
             return Err(CmdError::Params(format!("`type` must be one of {}", TYPES.join(", "))));
         };
         let petition = kind == "petition";
-        let usps = if petition {
-            None
-        } else {
-            match req(v, "service")?.as_str() {
-                "efileCounsel" => None,
-                "efileUsps" => Some((req(v, "servedParty")?, req(v, "servedAddress")?)),
-                _ => return Err(CmdError::Params("`service` must be efileCounsel or efileUsps".into())),
+        let mut first = side(v, "firstSide")?;
+        let mut second = side(v, "secondSide")?;
+        let client_first = match (first.has_client(), second.has_client()) {
+            (true, true) => return Err(CmdError::Params("the parties we represent must all be on one side (`client` is set on both)".into())),
+            (true, false) => true,
+            (false, true) => false,
+            // Older callers name the side instead: everyone on it who isn't pro se.
+            (false, false) => {
+                let first_side = match text(v, "weRepresent")?.as_deref() {
+                    Some("first") => true,
+                    Some("second") => false,
+                    Some(_) => return Err(CmdError::Params("`weRepresent` must be first or second".into())),
+                    None => return Err(CmdError::Params("mark the parties we represent with `\"client\": true` (or give `weRepresent`)".into())),
+                };
+                let side = if first_side { &mut first } else { &mut second };
+                for p in side.parties.iter_mut().filter(|p| !p.pro_se) {
+                    p.client = true;
+                }
+                if !side.has_client() {
+                    return Err(CmdError::Params("`weRepresent` names a side with no party we can represent".into()));
+                }
+                first_side
             }
         };
-        let we_first = match req(v, "weRepresent")?.as_str() {
-            "first" => true,
-            "second" => false,
-            _ => return Err(CmdError::Params("`weRepresent` must be first or second".into())),
-        };
+        let mut mail = Vec::new();
+        if !petition {
+            for p in first.parties.iter().chain(&second.parties).filter(|p| p.pro_se) {
+                let Some(address) = &p.address else {
+                    return Err(CmdError::Params(format!("`address` is required for pro se party {}", p.name)));
+                };
+                mail.push((p.name.clone(), address.clone()));
+            }
+            match text(v, "service")?.as_deref() {
+                None | Some("efileCounsel") => {}
+                Some("efileUsps") => mail.push((req(v, "servedParty")?, req(v, "servedAddress")?)),
+                Some(_) => return Err(CmdError::Params("`service` must be efileCounsel or efileUsps".into())),
+            }
+        }
+        let counsel = first.parties.iter().chain(&second.parties).any(|p| !p.client && !p.pro_se);
         let date = match text(v, "filingDate")? {
             Some(d) => parse_date(&d).ok_or_else(|| CmdError::Params(format!("`filingDate` must be a date as YYYY-MM-DD, not `{d}`")))?,
             // ponytail: UTC "today", as insert.dateTime does; nothing here knows the local zone.
@@ -188,19 +233,37 @@ impl Form {
             county: req(v, "county")?,
             // A petition may be filed before a case number is assigned.
             case_number: if petition { text(v, "caseNumber")?.unwrap_or_default() } else { req(v, "caseNumber")? },
-            first: side(v, "firstSide")?,
-            second: side(v, "secondSide")?,
-            we_first,
-            usps,
+            first,
+            second,
+            client_first,
+            mail,
+            counsel,
             date,
             verified,
             firm,
         })
     }
 
-    /// The side the firm represents.
+    /// The side the firm's clients are on.
     fn client(&self) -> &Side {
-        if self.we_first { &self.first } else { &self.second }
+        if self.client_first { &self.first } else { &self.second }
+    }
+
+    /// The names of the parties the firm represents.
+    fn clients(&self) -> Vec<String> {
+        self.client().parties.iter().filter(|p| p.client).map(|p| p.name.clone()).collect()
+    }
+
+    /// The clients' role, plural for more than one ("Respondents").
+    fn client_role(&self) -> String {
+        plural_role(&self.client().role, self.clients().len())
+    }
+
+    /// Who the signature block says the firm is attorney for: the role alone when the firm
+    /// represents everyone on its side, else the role and the clients' names.
+    fn for_whom(&self) -> String {
+        let clients = self.clients();
+        if clients.len() == self.client().parties.len() { self.client_role() } else { format!("{} {}", self.client_role(), join_names(&clients)) }
     }
 
     /// A firm detail by field name, empty when it isn't set.
@@ -224,7 +287,17 @@ fn req(v: &Value, key: &str) -> Result<String, CmdError> {
     text(v, key)?.ok_or_else(|| CmdError::Params(format!("`{key}` is required")))
 }
 
-/// A party side param (`{"names": [string], "role": string}`), checked.
+/// A true/false flag on a party; missing is false.
+fn flag(o: &Value, key: &str, side: &str) -> Result<bool, CmdError> {
+    match o.get(key) {
+        None | Some(Value::Null) => Ok(false),
+        Some(Value::Bool(b)) => Ok(*b),
+        Some(_) => Err(CmdError::Params(format!("`{side}.names[].{key}` must be true or false"))),
+    }
+}
+
+/// A party side param, checked: `{"names": [name], "role": string}`, each name a string or
+/// `{"name": string, "client"?: bool, "proSe"?: bool, "address"?: string}`.
 fn side(v: &Value, key: &str) -> Result<Side, CmdError> {
     let Some(obj) = v.get(key).filter(|o| o.is_object()) else {
         return Err(CmdError::Params(format!("`{key}` is required: {{\"names\": [string], \"role\": string}}")));
@@ -233,22 +306,40 @@ fn side(v: &Value, key: &str) -> Result<Side, CmdError> {
     if list.len() > MAX_NAMES {
         return Err(CmdError::Params(format!("`{key}.names` has more than {MAX_NAMES} names")));
     }
-    let mut names = Vec::new();
+    let mut parties = Vec::new();
     for n in list {
-        let Some(n) = n.as_str() else { return Err(CmdError::Params(format!("`{key}.names` must be strings"))) };
-        if n.chars().count() > MAX_TEXT {
+        let (name, client, pro_se, address) = match n {
+            Value::String(name) => (name.as_str(), false, false, None),
+            Value::Object(o) => {
+                let Some(name) = o.get("name").and_then(Value::as_str) else {
+                    return Err(CmdError::Params(format!("`{key}.names` entries need a `name` string")));
+                };
+                let address = text(n, "address")
+                    .map_err(|_| CmdError::Params(format!("`{key}.names[].address` must be a string of at most {MAX_TEXT} characters")))?;
+                (name, flag(n, "client", key)?, flag(n, "proSe", key)?, address)
+            }
+            _ => return Err(CmdError::Params(format!("`{key}.names` must be strings or {{\"name\": string, …}}"))),
+        };
+        if name.chars().count() > MAX_TEXT {
             return Err(CmdError::Params(format!("`{key}.names` has a name longer than {MAX_TEXT} characters")));
         }
-        if !n.trim().is_empty() {
-            names.push(n.trim().to_string());
+        let name = name.trim();
+        if name.is_empty() {
+            continue;
         }
+        if client && pro_se {
+            return Err(CmdError::Params(format!("`{key}`: {name} can't be both our client and pro se")));
+        }
+        // An address typed on several lines reads as one.
+        let address = address.map(|a| a.lines().map(str::trim).filter(|l| !l.is_empty()).collect::<Vec<_>>().join(", "));
+        parties.push(Party { name: name.to_string(), client, pro_se, address });
     }
-    if names.is_empty() {
+    if parties.is_empty() {
         return Err(CmdError::Params(format!("`{key}.names` is required")));
     }
     let role = text(obj, "role").map_err(|_| CmdError::Params(format!("`{key}.role` must be a string")))?;
     let role = role.ok_or_else(|| CmdError::Params(format!("`{key}.role` is required")))?;
-    Ok(Side { names, role })
+    Ok(Side { parties, role })
 }
 
 /// `YYYY-MM-DD`, a real date.
@@ -286,6 +377,18 @@ fn ordinal_suffix(d: u32) -> &'static str {
         (2, _) => "nd",
         (3, _) => "rd",
         _ => "th",
+    }
+}
+
+/// The role for `n` parties: the usual roles take an s ("Petitioners"); a role typed in for
+/// Other is left as typed.
+pub fn plural_role(role: &str, n: usize) -> String {
+    const ROLES: [&str; 4] = ["Petitioner", "Plaintiff", "Respondent", "Defendant"];
+    if n > 1 && ROLES.iter().any(|r| r.eq_ignore_ascii_case(role)) {
+        let s = if role.chars().any(char::is_lowercase) { "s" } else { "S" };
+        format!("{role}{s}")
+    } else {
+        role.to_string()
     }
 }
 
@@ -456,10 +559,10 @@ impl Writer<'_> {
         // Parties: 62% of the text width, 8 pt above and below, 20 pt before the rule.
         self.cell(&cell(0), width * 0.62, [8.0, 0.0, 8.0, 20.0])?;
         for (side, end) in [(&f.first, ","), (&f.second, ".")] {
-            for name in &side.names {
-                self.para("Caption", &name.to_uppercase())?;
+            for p in &side.parties {
+                self.para("Caption", &p.name.to_uppercase())?;
             }
-            self.para("Caption", &format!("{}{end}", side.role))?;
+            self.para("Caption", &format!("{}{end}", plural_role(&side.role, side.parties.len())))?;
             self.run("para.indents", json!({"left": 54}))?;
             if end == "," {
                 self.para("Caption", "v.")?;
@@ -492,8 +595,9 @@ impl Writer<'_> {
 
     /// The opening paragraphs for the pleading's type, with placeholders for what the attorney fills in.
     fn body(&mut self, f: &Form) -> Result<(), CmdError> {
-        let client = f.client();
-        let (names, role) = (join_names(&client.names), &client.role);
+        let clients = f.clients();
+        let (names, role) = (join_names(&clients), f.client_role());
+        let prays = if clients.len() > 1 { "pray" } else { "prays" };
         match f.kind {
             "notice" => self.lead(
                 "PLEASE TAKE NOTICE",
@@ -508,14 +612,14 @@ impl Writer<'_> {
                 for n in 1..=3 {
                     self.listed("numbered", &format!("[Response to paragraph {n}.]"))?;
                 }
-                self.lead("WHEREFORE", &format!(", {role} prays this Court deny the relief requested in the Petition and grant such other and further relief as the Court deems just and proper."))
+                self.lead("WHEREFORE", &format!(", {role} {prays} this Court deny the relief requested in the Petition and grant such other and further relief as the Court deems just and proper."))
             }
             "petition" => {
                 self.lead("COMES NOW", &format!(" {names}, {role}, by and through counsel, and for {} states as follows:", title_case(&f.title)))?;
                 for _ in 0..3 {
                     self.listed("numbered", "[Allegation.]")?;
                 }
-                self.lead("WHEREFORE", &format!(", {role} prays that this Court:"))?;
+                self.lead("WHEREFORE", &format!(", {role} {prays} that this Court:"))?;
                 self.listed("lowerLetterDot", "[Relief requested.]")?;
                 self.listed("lowerLetterDot", "Grant such other and further relief as the Court deems just and proper.")
             }
@@ -526,7 +630,7 @@ impl Writer<'_> {
                 }
                 self.lead(
                     "WHEREFORE",
-                    &format!(", {role} prays this Court [state the relief requested] and for such other and further relief as the Court deems just and proper."),
+                    &format!(", {role} {prays} this Court [state the relief requested] and for such other and further relief as the Court deems just and proper."),
                 )
             }
         }
@@ -546,23 +650,33 @@ impl Writer<'_> {
             lines.push(sig(format!("{} - fax", f.firm("fax"))));
         }
         lines.push(sig(f.firm("email").into()));
-        lines.push(Line { before: Some(12.0), after: Some(12.0), ..sig(format!("Attorney for {}", f.client().role)) });
+        lines.push(Line { before: Some(12.0), after: Some(12.0), ..sig(format!("Attorney for {}", f.for_whom())) });
         lines.push(Line { before: Some(18.0), ..sig(format!("By: /s/ {}", f.firm("attorneyName"))) });
         lines.push(sig(format!("{}, MO Bar No. {}", f.firm("attorneyName"), f.firm("barNumber"))));
         self.block(&lines)
     }
 
-    /// The certificate of service: e-filing to counsel of record, plus USPS service when it was asked for.
+    /// The certificate of service: e-filing to counsel of record, and USPS to each pro se party.
     fn certificate(&mut self, f: &Form) -> Result<(), CmdError> {
-        let mut said = format!(
-            "I hereby certify that on this {}, an electronic copy of the foregoing was sent through the Missouri e-Filing system to counsel of record.",
-            long_date(f.date)
-        );
-        if let Some((party, address)) = &f.usps {
-            said.push_str(&format!(
-                " A copy of this {} was sent to {party} postage pre-paid via USPS to last known address of {address}, on today's date.",
-                f.title
-            ));
+        let date = long_date(f.date);
+        let mut said = String::new();
+        if f.counsel || f.mail.is_empty() {
+            said = format!(
+                "I hereby certify that on this {date}, an electronic copy of the foregoing was sent through the Missouri e-Filing system to counsel of record."
+            );
+        }
+        for (party, address) in &f.mail {
+            if said.is_empty() {
+                said = format!(
+                    "I hereby certify that on this {date}, a copy of this {} was sent to {party} postage pre-paid via USPS to last known address of {address}.",
+                    f.title
+                );
+            } else {
+                said.push_str(&format!(
+                    " A copy of this {} was sent to {party} postage pre-paid via USPS to last known address of {address}, on today's date.",
+                    f.title
+                ));
+            }
         }
         let attorney = f.firm("attorneyName");
         self.block(&[
@@ -575,8 +689,7 @@ impl Writer<'_> {
 
     /// The client's verification of a petition, with its notary block.
     fn verification(&mut self, f: &Form) -> Result<(), CmdError> {
-        let client = f.client();
-        let names = join_names(&client.names);
+        let names = join_names(&f.clients());
         let rule = "___________________________";
         self.block(&[
             Line { bold: true, ..line("Certificate", "VERIFICATION") },
@@ -585,7 +698,7 @@ impl Writer<'_> {
                 format!("The undersigned, {names}, states that the facts set forth in the foregoing Petition are true and correct to the best of my knowledge and belief."),
             ),
             Line { before: Some(18.0), ..line("Certificate", rule) },
-            line("Certificate", format!("{names}, {}", client.role)),
+            line("Certificate", format!("{names}, {}", f.client_role())),
             line("Certificate", "State of Missouri"),
             line("Certificate", format!("County of {}", title_case(&f.county))),
             line("Certificate", "Subscribed and sworn to before me this _______ day of _____________, 20_____."),
