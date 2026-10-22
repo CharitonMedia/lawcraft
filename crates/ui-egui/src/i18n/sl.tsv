@@ -2763,3 +2763,7 @@ preview	Title	Naslov
 	{names} and {n} more	{names} and {n} more
 	{name} options	{name} options
 	{width} × {height} pixels	{width} × {height} pixels
+# File › Options › Add-ins
+	Add-ins	Dodatki
+	No add-ins are installed.	Nameščen ni noben dodatek.
+	Each add-in stays off until you turn it on.	Vsak dodatek ostane izklopljen, dokler ga ne vklopite.

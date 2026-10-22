@@ -2762,3 +2762,7 @@ template	Letter	Scrisoare
 	cm	cm
 	mm	mm
 	pi	pi
+# File › Options › Add-ins
+	Add-ins	Programe de completare
+	No add-ins are installed.	Nu este instalat niciun program de completare.
+	Each add-in stays off until you turn it on.	Fiecare program de completare rămâne dezactivat până când îl activați.
