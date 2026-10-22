@@ -1,0 +1,108 @@
+name: Sync with WordCraft
+
+# Every night: merge WordCraft's main, run the full quality gate, and push to main when it passes.
+# When the merge or the gate fails, nothing is pushed and an issue is opened (or updated) and
+# assigned to the maintainer, so GitHub emails him; a later passing night closes it.
+on:
+  schedule:
+    - cron: "0 8 * * *" # 3 a.m. Central daylight time, 2 a.m. standard
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: sync
+  cancel-in-progress: false
+
+env:
+  CRAFT_FONTS_REF: 8dcdacd5153e64560d109541a47d806f26f048c0
+  MAINTAINER: pattalkslaw-del
+  ISSUE_TITLE: "Nightly WordCraft sync needs attention"
+
+jobs:
+  sync:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    env:
+      CARGO_TERM_COLOR: always
+      CARGO_INCREMENTAL: "0"
+    steps:
+      # The deploy key (write access to this repository only) pushes the merge, workflow files
+      # included, which GITHUB_TOKEN may not.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+          ssh-key: ${{ secrets.SYNC_DEPLOY_KEY }}
+
+      - name: Check out craft-fonts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: storytold/craft-fonts
+          ref: ${{ env.CRAFT_FONTS_REF }}
+          path: craft-fonts
+
+      - name: Install Linux build dependencies (winit, wgpu, rfd)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config libxkbcommon-dev libwayland-dev libx11-dev libxcursor-dev libxrandr-dev \
+            libxi-dev libgtk-3-dev libfontconfig1-dev libfreetype-dev mesa-vulkan-drivers
+
+      - name: Install Rust (stable + clippy, rustfmt, wasm32)
+        run: |
+          rustup toolchain install stable --profile minimal --component clippy,rustfmt \
+            --target wasm32-unknown-unknown
+          rustup default stable
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+
+      - name: Merge WordCraft main
+        id: merge
+        run: |
+          git config user.name "LawCraft sync"
+          git config user.email "245314230+pattalkslaw-del@users.noreply.github.com"
+          .github/sync/sync.sh
+
+      - name: Quality gate
+        if: steps.merge.outputs.result == 'merged'
+        env:
+          CRAFT_FONTS_DIR: ${{ github.workspace }}/craft-fonts
+        run: cargo xtask ci
+
+      - name: Push
+        if: steps.merge.outputs.result == 'merged'
+        run: git push origin HEAD:main
+
+      - name: Close the attention issue
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for n in $(gh issue list --state open --search "in:title \"$ISSUE_TITLE\"" --json number --jq '.[].number'); do
+            gh issue close "$n" --comment "Tonight's sync passed: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          done
+
+      - name: Tell the maintainer
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CONFLICTS: ${{ steps.merge.outputs.conflicts }}
+        run: |
+          run="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          if [ -n "$CONFLICTS" ]; then
+            why="Merging WordCraft's main conflicts with LawCraft in: \`$CONFLICTS\`. Nothing was pushed."
+          else
+            why="The merge went through but the quality gate (\`cargo xtask ci\`) failed. Nothing was pushed."
+          fi
+          body="@$MAINTAINER $why
+
+          Run: $run"
+          n="$(gh issue list --state open --search "in:title \"$ISSUE_TITLE\"" --json number --jq '.[0].number // empty')"
+          if [ -n "$n" ]; then
+            gh issue comment "$n" --body "$body"
+          else
+            gh issue create --title "$ISSUE_TITLE" --assignee "$MAINTAINER" --body "$body"
+          fi
