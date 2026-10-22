@@ -83,6 +83,7 @@ pub mod table_pen;
 pub mod table_resize;
 pub mod table_ruler;
 pub mod theme;
+pub mod update;
 pub mod widgets;
 pub mod window_close;
 pub mod window_geometry;
@@ -360,6 +361,8 @@ pub struct UiState {
     pub update_fields_before_print: bool,
     /// The custom dictionary (File › Options › Proofing, Add to Dictionary), kept between runs.
     pub dictionary: Vec<String>,
+    /// Desktop update check (#15).
+    pub update_prefs: wordcraft_engine::update::UpdatePrefs,
 }
 
 /// The ribbon tab the app opens on, and the one it falls back to when the tab that was showing
@@ -427,6 +430,7 @@ impl Default for UiState {
             print_backgrounds: false,
             update_fields_before_print: false,
             dictionary: Vec::new(),
+            update_prefs: wordcraft_engine::update::UpdatePrefs::default(),
         }
     }
 }
@@ -630,6 +634,8 @@ pub struct WordApp {
     pub(crate) outline_prev_tab: Option<String>,
     /// Zotero commands in flight (`ui.zotero.*`).
     pub zotero: zotero::ZoteroLink,
+    pub update: update::UpdateCheck,
+    pub show_update_startup_prompt: bool,
     /// The egui context, once the first frame has run (background work wakes the UI with it).
     pub(crate) ctx: Option<egui::Context>,
     /// Read Aloud: the start of the sentence the caret was last moved to, and the last error shown.
@@ -751,6 +757,8 @@ impl WordApp {
             smart_art_row_focused: false,
             outline_prev_tab: None,
             zotero: zotero::ZoteroLink::default(),
+            update: update::UpdateCheck::default(),
+            show_update_startup_prompt: false,
             ctx: None,
             read_aloud_at: None,
             read_aloud_error: None,
@@ -817,6 +825,7 @@ impl WordApp {
         ui.keyboard = self.session.keymap.clone();
         ui.ribbon = self.session.ribbon.clone();
         ui.ink_pens = self.session.view.draw.pens.clone();
+        ui.update_prefs = self.session.update_prefs.clone();
         ui
     }
 
@@ -864,6 +873,7 @@ impl WordApp {
         self.session.view.proofing = self.ui.check_spelling;
         self.session.keymap = std::mem::take(&mut self.ui.keyboard);
         self.session.ribbon = std::mem::take(&mut self.ui.ribbon);
+        self.session.update_prefs = self.ui.update_prefs.clone();
         // The add-ins the saved setting turns on bring their commands (and ribbon tabs) first, so
         // the keys and toolbar entries saved for those commands are kept.
         self.sync_addins();
@@ -1036,6 +1046,14 @@ impl WordApp {
                 self.status(e.clone());
             }
             return r;
+        }
+        if id == "file.checkForUpdates"
+            && update::can_run_off_thread(self)
+            && let Some(ctx) = self.ctx.clone()
+        {
+            let startup = params.get("startup").and_then(Value::as_bool) == Some(true);
+            update::queue_check(self, params, !startup, &ctx);
+            return Ok(json!({"pending": "updateCheck"}));
         }
         // Web: saving and exporting become downloads.
         if self.services.download.is_some() && matches!(id, "file.save" | "file.saveAs" | "file.exportPdf" | "file.exportPng") {
@@ -1226,6 +1244,17 @@ impl WordApp {
         if !go {
             return Ok(json!({"done": false}));
         }
+        if then == "file.checkForUpdates" && choice == SaveChoice::DontSave {
+            // The update may now install over this revision's unsaved changes.
+            self.update.discard_approved = Some(self.session.rev());
+        }
+        if then == "file.checkForUpdates"
+            && update::can_run_off_thread(self)
+            && let Some(ctx) = self.ctx.clone()
+        {
+            update::queue_check(self, params, false, &ctx);
+            return Ok(json!({"done": true}));
+        }
         self.execute_user(&then, params).map(|r| json!({"done": true, "result": r}))
     }
 
@@ -1389,6 +1418,10 @@ impl WordApp {
             self.status(tl!("Wait for the print job to finish submitting before closing."));
             return false;
         }
+        if update::install_busy(self) {
+            self.status(tl!("Wait for the update to finish before closing."));
+            return false;
+        }
         // An add-in's options page saves what it has pending first; when it can't, the window
         // stays open and the page shows why.
         if !self.leave_addin_page() {
@@ -1433,6 +1466,24 @@ impl WordApp {
         Ok(json!({"closed": true}))
     }
 
+    /// A finished update asked to quit. Run the normal close path (unlike a user quit, it hasn't
+    /// been confirmed against the document as it is now), so a document edited after the update
+    /// worker finished still gets the save prompt. Returns true once the close may begin; false
+    /// when the document is dirty and the prompt was shown (or nothing was pending).
+    pub fn update_quit_requested(&mut self) -> bool {
+        if self.update.reboot_notice {
+            return false;
+        }
+        if !std::mem::take(&mut self.update.quit_pending) {
+            return false;
+        }
+        // Don't Save was the answer for this revision: close without asking again.
+        if self.session.dirty && !self.update.unsaved_blocks(&self.session) {
+            self.quit_requested = true;
+        }
+        self.close_requested()
+    }
+
     fn after_command(&mut self, id: &str) {
         options::sync(self);
         self.canvas.caret_visible_since = now_ms();
@@ -1474,6 +1525,13 @@ impl WordApp {
             || (self.canvas.table_tool == Some(crate::table_pen::TableTool::Erase) && self.session.sel.focus.path.cell().is_none())
         {
             crate::table_pen::stop(self);
+        }
+    }
+
+    /// UI requests produced off the UI thread (for example the update-check worker).
+    pub(crate) fn apply_ui_requests(&mut self, requests: Vec<Value>) {
+        for req in requests {
+            self.handle_request(&req);
         }
     }
 
@@ -1529,6 +1587,18 @@ impl WordApp {
         }
         if req.get("close").is_some() {
             self.quit_requested = true;
+        }
+        if req.get("quit").and_then(Value::as_bool) == Some(true) {
+            self.quit_requested = true;
+        }
+        if let Some(up) = req.get("update") {
+            update::apply_command_result(self, up);
+        }
+        if req.get("updateReboot").is_some() {
+            self.update.reboot_notice = true;
+        }
+        if req.get("updateMacDmg").and_then(Value::as_bool) == Some(true) {
+            self.update_feedback(tl!("Drag WordCraft into Applications, then reopen it."));
         }
     }
 
@@ -1905,6 +1975,17 @@ impl WordApp {
         self.status_msg = Some((s.into(), now_ms()));
     }
 
+    /// A one-line update answer: the status bar in the editor, plus a durable bar over Backstage,
+    /// whose status bar is hidden. A manual check runs from File ▸ Check for updates, and the macOS
+    /// handoff instruction and install errors must stay visible there (#15 review).
+    pub(crate) fn update_feedback(&mut self, s: impl Into<String>) {
+        let text = s.into();
+        self.status(text.clone());
+        if self.ui.backstage {
+            self.update.message = Some(text);
+        }
+    }
+
     /// Media key of the selected picture, if any.
     pub(crate) fn selected_picture_media(&self) -> Option<String> {
         match wordcraft_engine::cmd::objects::selected(&self.session) {
@@ -2232,6 +2313,7 @@ impl WordApp {
         self.drain_control(ctx);
         zotero::poll(self, ctx);
         read_aloud::poll(self, ctx);
+        update::poll(self, ctx);
         self.clear_stale_change_picture();
         let _ = self.poll_file_dialog();
         self.drain_inbox();
@@ -2436,11 +2518,17 @@ impl WordApp {
             backstage::forget_save_as_error(&ctx);
         }
         if self.ui.backstage {
+            // The update notice and restart banner also render over Backstage: a check started from
+            // File ▸ Check for updates (or on startup, while the Home screen is showing) must show
+            // its version, notes and actions there, and an install that finished while File is open
+            // still gets its OK button before the app quits to restart (#15 review).
+            update::bar(self, ui);
             backstage::show(self, ui);
         } else if !self.has_document() {
             // No document open (#1129): the ribbon greyed out but for Help, and no page.
             chrome::title_bar(self, ui);
             ribbon::show(self, ui);
+            update::bar(self, ui);
             chrome::status_bar(self, ui);
             egui::CentralPanel::default().frame(egui::Frame::NONE.fill(t.canvas)).show(ui, |_| {});
         } else {
@@ -2452,6 +2540,12 @@ impl WordApp {
             } else {
                 chrome::title_bar(self, ui);
                 ribbon::show(self, ui);
+            }
+            // Help ▸ Check for updates and startup checks run in the editor; the release notice and
+            // restart banner must show here too, not only over Backstage or with no document open
+            // (#15 review).
+            update::bar(self, ui);
+            if !self.session.view.focus_mode {
                 chrome::status_bar(self, ui);
                 panes::show(self, ui);
             }
@@ -2471,6 +2565,13 @@ impl WordApp {
         colors::show(self, &ctx);
         zotero::show_alert(self, &ctx);
         read_aloud::show(self, &ctx);
+        if self.show_update_startup_prompt {
+            let mut open = true;
+            update::startup_prompt(self, ui, &mut open);
+            if !open {
+                self.show_update_startup_prompt = false;
+            }
+        }
         crate::keytips::show(self, &ctx, ui);
         keys::global_shortcuts(self, &ctx);
         self.refocus_after_chrome_click(&ctx);
@@ -2624,6 +2725,7 @@ impl WordApp {
                 control::Outcome::Done(v) => {
                     let _ = reply.send(v);
                 }
+                control::Outcome::Deferred => {}
                 control::Outcome::Screenshot { path } => {
                     self.shot_token += 1;
                     let token = self.shot_token;
@@ -2869,6 +2971,8 @@ pub(crate) fn works_without_document(id: &str) -> bool {
             | "ui.discord"
             | "ui.caretAnimation"
             | "ui.startScreen"
+            | "file.checkForUpdates"
+            | "file.updatePrefs"
     ) || id.starts_with("help.")
 }
 
@@ -5716,6 +5820,56 @@ mod tests {
         assert!(h.query_by_label("Save").is_some(), "Save again is offered");
     }
 
+    #[test]
+    fn window_close_waits_for_update_worker() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::time::Duration;
+        use wordcraft_engine::update::LATEST_API;
+
+        let hold = Arc::new(AtomicBool::new(true));
+        let ctx = egui::Context::default();
+        let mut a = app();
+        a.ctx = Some(ctx.clone());
+        let gate = Arc::clone(&hold);
+        a.session.update_http = Some(Arc::new(move |u, _| {
+            if u == LATEST_API {
+                while gate.load(Ordering::Relaxed) {
+                    std::thread::sleep(Duration::from_millis(1));
+                }
+            }
+            Ok(vec![])
+        }));
+        update::queue_check(&mut a, json!({"force": true}), true, &ctx);
+        assert!(update::worker_busy(&a));
+        assert!(a.close_requested(), "a plain check doesn't hold the window open");
+        a.quit_requested = false;
+        // Let the check finish, then start an install.
+        hold.store(false, Ordering::Relaxed);
+        for _ in 0..200 {
+            update::poll(&mut a, &ctx);
+            if !update::worker_busy(&a) {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(!update::worker_busy(&a));
+        hold.store(true, Ordering::Relaxed);
+        update::queue_check(&mut a, json!({"force": true, "apply": true}), false, &ctx);
+        assert!(update::install_busy(&a));
+        assert!(!a.close_requested(), "an install must not be interrupted by closing");
+        hold.store(false, Ordering::Relaxed);
+        for _ in 0..200 {
+            update::poll(&mut a, &ctx);
+            if !update::worker_busy(&a) {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(!update::worker_busy(&a));
+        assert!(a.close_requested(), "close is allowed once the worker finishes");
+    }
+
     /// Enter activates the focused prompt button; it means Save only when no button has focus.
     /// (Enter on a focused Cancel or Don't Save used to be overridden by a blanket Enter → Save.)
     #[test]
@@ -7170,6 +7324,36 @@ mod tests {
         let r = send(&mut a, "file.close", json!({"force": true}));
         assert_eq!(r["ok"], json!(true), "{r}");
         assert!(!a.has_document() && !a.quit_requested);
+    }
+
+    #[test]
+    fn control_update_check_defers_until_worker_finishes() {
+        use std::sync::Arc;
+        use std::time::Duration;
+
+        use wordcraft_engine::update::LATEST_API;
+
+        let cur = env!("CARGO_PKG_VERSION");
+        let latest = format!(r#"{{"tag_name":"v{cur}","draft":false,"prerelease":false,"assets":[]}}"#);
+        let latest = Arc::new(latest);
+        let ctx = egui::Context::default();
+        let mut a = app();
+        a.ctx = Some(ctx.clone());
+        let body = Arc::clone(&latest);
+        a.session.update_http = Some(Arc::new(move |u, _| if u == LATEST_API { Ok(body.as_bytes().to_vec()) } else { Ok(vec![]) }));
+        let (req, rx) = ControlRequest::new("engine.execute", json!({"command": "file.checkForUpdates", "params": {"force": true}}));
+        assert!(matches!(control::handle(&mut a, &ctx, &req), control::Outcome::Deferred));
+        for _ in 0..200 {
+            update::poll(&mut a, &ctx);
+            if !update::worker_busy(&a) {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(!update::worker_busy(&a));
+        let reply = rx.recv_timeout(Duration::from_secs(2)).expect("control reply");
+        assert_eq!(reply.get("ok"), Some(&json!(true)));
+        assert_eq!(reply.get("result").and_then(|r| r.get("status")).and_then(Value::as_str), Some("current"));
     }
 
     const MAILINGS: [&str; 3] = ["mailings.envelopes", "mailings.labels", "mailings.finish"];
