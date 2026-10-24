@@ -419,6 +419,10 @@ pub struct Session {
     /// The newest automatic capitalisation, for Word's "Automatically add words to list" (#1857).
     pub(crate) autocap: Option<crate::cmd::tools::AutoCap>,
     rev: u64,
+    /// What Restrict Editing's outright refusals depend on, for greying out commands
+    /// ([`Session::why_disabled`]): computed once per document, revision and author instead of
+    /// for every button on every frame.
+    protect_facts: std::sync::Mutex<Option<((u64, u64, String), crate::cmd::protect::Facts)>>,
     /// Which document this is: changes when [`Session::set_document`] replaces it (open, new,
     /// mail merge, recover), never on an edit.
     document_id: u64,
@@ -670,12 +674,23 @@ fn doc_bib_style(doc: &Document) -> String {
     doc.settings.bib_style.as_deref().and_then(crate::cmd::citations::find_style).map_or("APA", |st| st.name).to_string()
 }
 
+/// Most pending front-end requests a session keeps.
+pub const MAX_UI_REQUESTS: usize = 64;
 /// Maximum undo depth.
 const MAX_UNDO: usize = 500;
 /// How many steps the Undo button's list shows (#701); `edit.undoTo` reaches no further.
 pub const UNDO_LIST_MAX: usize = 100;
 
 impl Session {
+    /// Queue a request for the front end. A headless session never drains the queue, so only
+    /// the newest [`MAX_UI_REQUESTS`] are kept.
+    pub fn push_ui_request(&mut self, req: Value) {
+        if self.ui_requests.len() >= MAX_UI_REQUESTS {
+            self.ui_requests.remove(0);
+        }
+        self.ui_requests.push(req);
+    }
+
     /// File name of the persisted custom dictionary inside the settings folder.
     pub const USER_DICT_FILE: &str = "custom-dictionary.txt";
 
@@ -754,6 +769,7 @@ impl Session {
             join_next: false,
             autocap: None,
             rev: 1,
+            protect_facts: std::sync::Mutex::new(None),
             document_id: 1,
             cache: LayoutCache::new(),
             layout: None,
@@ -1167,6 +1183,7 @@ impl Session {
         let opts = LayoutOptions {
             view: ViewMode::Print,
             comment_balloons: markup && self.prefs.markup.comments,
+            numeral: self.view.numeral.resolve(SYSTEM_LOCALE.get().map(String::as_str)),
             filename: Some(Arc::from(fn_name.as_str())),
             filepath: Some(Arc::from(fn_path.as_str())),
             ..Default::default()
@@ -1363,6 +1380,12 @@ impl Session {
         self.typing_open = false;
     }
 
+    /// The version snapshots belong to the document they were taken from: keeping the old ones
+    /// would let a restore put the previous document's content into this one (#1327 follow-up).
+    pub fn clear_versions(&mut self) {
+        self.versions.clear();
+    }
+
     /// The region in effect (#838): the one the user chose ([`Prefs::region`]), else the
     /// system's.
     pub fn region(&self) -> wordcraft_geom::Region {
@@ -1423,6 +1446,7 @@ impl Session {
         self.reset_history();
         self.lint_findings.clear();
         self.export_check_commands.clear();
+        self.clear_versions();
         crate::hooks::run_on_document_loaded(self);
         self.touch();
         self.dirty = false;
@@ -1480,6 +1504,7 @@ impl Session {
             join_next,
             autocap: _,
             rev: _,
+            protect_facts: _,
             cache: _,
             layout: _,
             // The word being typed, like `column`: valid only while `sel` is where typing left it.
@@ -1593,7 +1618,21 @@ impl Session {
     /// Restrict Editing refuses outright. `None` when it can run (or doesn't exist).
     pub fn why_disabled(&self, id: &str) -> Option<&'static str> {
         let spec = self.registry.get(id)?;
-        (spec.enabled)(self).or_else(|| if spec.mutates { crate::cmd::protect::greyed_out(self, id) } else { None })
+        (spec.enabled)(self).or_else(|| if spec.mutates { crate::cmd::protect::greyed_out(self, id, || self.protect_facts()) } else { None })
+    }
+
+    /// [`crate::cmd::protect::Facts`] for the document as it is now, cached per revision.
+    fn protect_facts(&self) -> crate::cmd::protect::Facts {
+        let key = (self.document_id, self.rev, self.author.clone());
+        let mut cache = self.protect_facts.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some((k, f)) = cache.as_ref()
+            && *k == key
+        {
+            return *f;
+        }
+        let f = crate::cmd::protect::Facts::of(self);
+        *cache = Some((key, f));
+        f
     }
 
     /// Run a command by id with JSON params (the single entry point for the UI, CLI, MCP and
@@ -1653,6 +1692,22 @@ impl Session {
         } else {
             None
         };
+        // These mutating commands can replace the open document and discard its saved versions.
+        // Keep the versions until the command and the protected-region post-check have both
+        // succeeded; rejected commands must leave the old document and its snapshots together.
+        let replaces_document = matches!(id, "review.compare" | "review.combine" | "mailings.finish" | "mailings.envelopes" | "mailings.labels");
+        let versions_before = replaces_document.then(|| self.versions.clone());
+        let identity_before = replaces_document.then(|| {
+            (
+                self.path.clone(),
+                self.file_name.clone(),
+                self.document_id,
+                self.password.clone(),
+                self.dirty,
+                self.bib_style.clone(),
+                self.merge.preview,
+            )
+        });
         let typing = spec.id == "text.insert" || spec.id == "equation.type";
         if spec.mutates && !typing {
             self.typing_open = false;
@@ -1682,7 +1737,7 @@ impl Session {
         let mut result = match result {
             Ok(r) => r,
             Err(p) => {
-                let msg = p.downcast_ref::<&str>().map(|s| s.to_string()).or_else(|| p.downcast_ref::<String>().cloned()).unwrap_or_default();
+                let msg = p.downcast_ref::<&str>().map(ToString::to_string).or_else(|| p.downcast_ref::<String>().cloned()).unwrap_or_default();
                 Err(CmdError::Failed(format!("{id} panicked: {msg}")))
             }
         };
@@ -1734,6 +1789,18 @@ impl Session {
             Err(e) => {
                 self.autocap = None;
                 self.prefs.default_language = default_language_before;
+                if let Some(versions) = versions_before {
+                    self.versions = versions;
+                }
+                if let Some((path, file_name, document_id, password, dirty, bib_style, merge_preview)) = identity_before {
+                    self.path = path;
+                    self.file_name = file_name;
+                    self.document_id = document_id;
+                    self.password = password;
+                    self.dirty = dirty;
+                    self.bib_style = bib_style;
+                    self.merge.preview = merge_preview;
+                }
                 if let Some((d, s, h, r, t, ev, c)) = before_doc {
                     self.doc = d;
                     self.sel = s;

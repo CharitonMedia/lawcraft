@@ -450,6 +450,15 @@ pub enum Dialog {
         edit: bool,
         message: String,
     },
+    /// Mailings › Finish & Merge › Edit Individual Documents… or Print Documents… (`print`):
+    /// which records to merge (0 all, 1 the previewed one, 2 the From and To range).
+    MergeRecords {
+        print: bool,
+        choice: u8,
+        from: String,
+        to: String,
+        message: String,
+    },
     /// Mailings › Find Recipient.
     FindRecipient {
         text: String,
@@ -992,6 +1001,8 @@ impl Dialog {
             Dialog::SelectTable { .. } => "selectTable",
             Dialog::InsertMergeField { .. } => "insertMergeField",
             Dialog::FindRecipient { .. } => "findRecipient",
+            Dialog::MergeRecords { print: false, .. } => "mergeRecords",
+            Dialog::MergeRecords { .. } => "printRecords",
             Dialog::FieldCode { edit: false, .. } => "fieldCode",
             Dialog::FieldCode { .. } => "editFieldCode",
             Dialog::MergeRule { rule, .. } if rule == "SKIPIF" => "ruleSkipIf",
@@ -1243,7 +1254,7 @@ impl Dialog {
                         filter: RecipientFilter::from_session(m),
                     }
                 } else {
-                    let fields: Vec<String> = NEW_LIST_FIELDS.iter().map(|f| f.to_string()).collect();
+                    let fields: Vec<String> = NEW_LIST_FIELDS.iter().map(ToString::to_string).collect();
                     let rows = vec![vec![String::new(); fields.len()]];
                     Dialog::RecipientList { fields, rows, message: String::new(), filter: RecipientFilter::default() }
                 }
@@ -1253,6 +1264,13 @@ impl Dialog {
                 Dialog::InsertMergeField { field: fields.first().cloned().unwrap_or_default(), fields }
             }
             "findRecipient" => Dialog::FindRecipient { text: String::new(), message: String::new() },
+            "mergeRecords" | "printRecords" => Dialog::MergeRecords {
+                print: name == "printRecords",
+                choice: 0,
+                from: "1".into(),
+                to: app.session.merge.rows.len().to_string(),
+                message: String::new(),
+            },
             "fieldCode" => Dialog::FieldCode { code: String::new(), edit: false, message: String::new() },
             "editFieldCode" => {
                 let field = wordcraft_engine::cmd::fields::selected(&app.session).into_iter().next()?;
@@ -1451,6 +1469,7 @@ pub fn show(app: &mut WordApp, ctx: &egui::Context) {
         Dialog::SelectTable { .. } => "Select Table",
         Dialog::InsertMergeField { .. } => "Insert Merge Field",
         Dialog::FindRecipient { .. } => "Find Recipient",
+        Dialog::MergeRecords { .. } => "Finish & Merge",
         Dialog::FieldCode { edit: false, .. } => "Field",
         Dialog::FieldCode { .. } => "Edit Field Code",
         Dialog::MergeRule { rule, .. } if rule == "SKIPIF" => "Skip Record If",
@@ -1662,6 +1681,12 @@ pub(crate) fn buttons(ui: &mut Ui, ok: &str) -> (bool, bool) {
     r
 }
 
+/// The Font dialog preview's size: the Size box's points between 6 and 72, else 12. `"NaN"` and
+/// `"inf"` parse as floats too, and a NaN font size trips epaint's glyph assertion (#3663).
+fn preview_size(size: &str) -> f32 {
+    size.trim().parse::<f32>().ok().filter(|pt| pt.is_finite()).unwrap_or(12.0).clamp(6.0, 72.0)
+}
+
 /// The character properties the Font dialog's fields stand for.
 fn font_props(d: &Dialog) -> serde_json::Map<String, Value> {
     let Dialog::Font {
@@ -1789,7 +1814,7 @@ fn body(app: &mut WordApp, ui: &mut Ui, d: &mut Dialog) -> bool {
             ..
         } => {
             // Build the sample text format for the preview pane below.
-            let preview_size = size.trim().parse::<f32>().unwrap_or(12.0).clamp(6.0, 72.0);
+            let preview_size = preview_size(size);
             let preview_color = wordcraft_doc::Rgb::parse(color).map(crate::theme::c32).unwrap_or_else(|| ui.visuals().text_color());
             let mut fmt = egui::TextFormat {
                 font_id: egui::FontId::new(preview_size, egui::FontFamily::Proportional),
@@ -2981,6 +3006,46 @@ fn body(app: &mut WordApp, ui: &mut Ui, d: &mut Dialog) -> bool {
             let (ok, cancel) = buttons(ui, tl!("Find"));
             if ok && !text.trim().is_empty() {
                 match app.run("mailings.findRecipient", json!({"text": text.trim()})) {
+                    Ok(_) => return true,
+                    Err(e) => *message = e,
+                }
+            }
+            cancel
+        }
+        Dialog::MergeRecords { print, choice, from, to, message } => {
+            ui.radio_value(choice, 0, tl!("All"));
+            ui.radio_value(choice, 1, tl!("Current record"));
+            ui.horizontal(|ui| {
+                ui.radio_value(choice, 2, tl!("From:"));
+                // Typing a number picks the range, as in Word.
+                if ui.add(egui::TextEdit::singleline(from).desired_width(60.0)).changed() {
+                    *choice = 2;
+                }
+                ui.label(tl!("To:"));
+                if ui.add(egui::TextEdit::singleline(to).desired_width(60.0)).changed() {
+                    *choice = 2;
+                }
+            });
+            if !message.is_empty() {
+                ui.label(egui::RichText::new(message.as_str()).small().weak());
+            }
+            let (ok, cancel) = buttons(ui, tl!(if *print { "Print" } else { "OK" }));
+            if ok {
+                let params = match *choice {
+                    0 => Some(json!({"records": "all"})),
+                    1 => Some(json!({"records": "current"})),
+                    _ => match (from.trim().parse::<u64>(), to.trim().parse::<u64>()) {
+                        (Ok(f), Ok(t)) => Some(json!({"from": f, "to": t})),
+                        _ => None,
+                    },
+                };
+                let id = if *print { "mailings.printDocuments" } else { "mailings.finish" };
+                // An empty range is reported here, before Save Changes asks about the document.
+                let run = params.ok_or_else(|| tl!("Enter a number.").to_string()).and_then(|p| {
+                    wordcraft_engine::cmd::mailings::merge_range(&app.session, &p).map_err(|e| e.to_string())?;
+                    app.run(id, p)
+                });
+                match run {
                     Ok(_) => return true,
                     Err(e) => *message = e,
                 }
@@ -4209,11 +4274,34 @@ mod tests {
     #[test]
     fn command_search_respects_turkish_i_pairs_and_keeps_canonical_matches() {
         use egui_kittest::kittest::Queryable;
+        // Turkish casing follows the language code; the labels are fixtures with both I pairs.
+        const LABELS: &str =
+            "\tItalic\tİtalik\n\tHome\tGiriş\n\tFont\tYazı Tipi\n\tTable of Contents\tİçindekiler Tablosu\n\tReferences\tBaşvurular\n";
+        let reg = app_with("").session.registry.clone();
+        let italic = reg.get("format.italic").unwrap();
+        let table = reg.get("insert.table").unwrap();
+        let toc = reg.all().iter().find(|c| c.label == "Table of Contents" && c.location == "References › Table of Contents").unwrap();
+        crate::i18n::set_current(crate::i18n::fixture_lang("tr", LABELS));
+        for query in ["italik", "İTALİK", "YAZI TİPİ", "FORMAT.ITALIC", "ITALIC"] {
+            assert!(command_matches(italic, query), "tr: {query}");
+        }
+        for query in ["içindekiler", "TABLE OF CONTENTS"] {
+            assert!(command_matches(toc, query), "tr: {query}");
+        }
+        for query in ["INSERT", "INSERT.TABLE"] {
+            assert!(command_matches(table, query), "tr: {query}");
+        }
+        assert_eq!(crate::i18n::lowercase("Iİıi"), "ıiıi");
+        // The same labels under another language's code use Unicode's default casing.
+        crate::i18n::set_current(crate::i18n::fixture_lang("x-fixture", LABELS));
+        assert!(!command_matches(italic, "italik"), "İ lowercases to i plus a combining dot");
+        assert_eq!(crate::i18n::lowercase("Iİıi"), "ii\u{307}ıi");
+        crate::i18n::set_current(crate::i18n::Lang::EN);
+
         let mut fonts = false;
         let mut h = egui_kittest::Harness::builder().with_size(vec2(1440.0, 900.0)).build_ui_state(
             move |ui, app: &mut WordApp| {
                 let ctx = ui.ctx().clone();
-                crate::i18n::set_current(crate::i18n::Lang::from_pref(&app.ui.language));
                 if fonts {
                     show(app, &ctx);
                 } else {
@@ -4224,36 +4312,18 @@ mod tests {
             app_with("Unchanged document"),
         );
         let before = serde_json::to_value(&h.state().session.doc).unwrap();
-        for (language, query, expected) in [
-            ("tr", "italik", "İtalik   —   Giriş › Yazı Tipi"),
-            ("tr", "İTALİK", "İtalik   —   Giriş › Yazı Tipi"),
-            ("tr", "içindekiler", "İçindekiler Tablosu   —   Başvurular › İçindekiler Tablosu"),
-            ("tr", "YAZI TİPİ", "İtalik   —   Giriş › Yazı Tipi"),
-            // Dozens of commands match a lone INSERT and the box shows 14, in registry order: the
-            // witness is an early one; Table is checked below, past the box's limit.
-            ("tr", "INSERT", "Bölünemez Boşluk   —   Ekle › Semboller"),
-            ("tr", "INSERT.TABLE", "Tablo   —   Ekle › Tablolar"),
-            ("tr", "FORMAT.ITALIC", "İtalik   —   Giriş › Yazı Tipi"),
-            ("tr", "TABLE OF CONTENTS", "İçindekiler Tablosu   —   Başvurular › İçindekiler Tablosu"),
-            ("en", "ITALIC", "Italic   —   Home › Font"),
-            ("en", "FORMAT.ITALIC", "Italic   —   Home › Font"),
-            ("en", "INSERT.TABLE", "Table   —   Insert › Tables"),
-        ] {
-            h.state_mut().ui.language = language.into();
+        for (query, expected) in
+            [("ITALIC", "Italic   —   Home › Font"), ("FORMAT.ITALIC", "Italic   —   Home › Font"), ("INSERT.TABLE", "Table   —   Insert › Tables")]
+        {
             h.state_mut().dialog = Some(Dialog::Commands { query: query.into(), swallow: false });
             h.run_steps(4);
             assert!(
                 h.query(egui_kittest::kittest::By::new().role(egui::accesskit::Role::Button).label_contains(expected)).is_some(),
-                "{language}: {query}\n{:?}",
+                "{query}\n{:?}",
                 h.query_all_by_role(egui::accesskit::Role::Button).collect::<Vec<_>>()
             );
-            assert_eq!(crate::i18n::lowercase("Iİıi"), if language == "tr" { "ıiıi" } else { "ii\u{307}ıi" });
         }
         assert_eq!(serde_json::to_value(&h.state().session.doc).unwrap(), before, "search does not change the document");
-        crate::i18n::set_current(crate::i18n::Lang::from_pref("tr"));
-        let reg = h.state().session.registry.clone();
-        assert!(command_matches(reg.get("insert.table").unwrap(), "INSERT"), "tr: INSERT finds Table");
-        crate::i18n::set_current(crate::i18n::Lang::EN);
     }
 
     /// #2986: a box that keeps the keyboard asks for focus only while it lacks it. `request_focus`
@@ -4393,6 +4463,52 @@ mod tests {
 
     /// #1346: a check box the selected paragraphs differ in shows as neither on nor off; a click
     /// and OK turn it on in all of them, and the other fields they differ in stay as they were.
+    /// #3028: the records dialog refuses a range with no records itself, before Save Changes asks
+    /// about the unsaved document; a good range goes on to that question.
+    #[test]
+    fn merge_records_dialog_checks_the_range_before_asking_to_save() {
+        use egui_kittest::kittest::Queryable;
+        let mut app = app_with("Dear ");
+        let _ = app.run("mailings.recipients", json!({"csv": "Name\nAda\nAlan\nGrace"}));
+        let _ = app.run("text.insert", json!({"text": "unsaved"}));
+        assert!(app.session.dirty);
+        app.dialog = Dialog::open("mergeRecords", &mut app);
+        if let Some(Dialog::MergeRecords { choice, from, to, .. }) = &mut app.dialog {
+            *choice = 2;
+            *from = "3".into();
+            *to = "2".into();
+        }
+        let mut h = egui_kittest::Harness::builder().with_size(egui::vec2(1440.0, 900.0)).build_ui_state(
+            |ui, app: &mut WordApp| {
+                let ctx = ui.ctx().clone();
+                app.logic(&ctx);
+                app.ui(ui);
+            },
+            app,
+        );
+        for _ in 0..4 {
+            h.step();
+        }
+        h.get_by_role_and_label(egui::accesskit::Role::Button, "OK").click();
+        for _ in 0..2 {
+            h.step();
+        }
+        let Some(Dialog::MergeRecords { message, .. }) = &h.state().dialog else { panic!("the dialog stays open") };
+        assert!(message.contains("no records from 3 to 2"), "{message}");
+        if let Some(Dialog::MergeRecords { to, .. }) = &mut h.state_mut().dialog {
+            *to = "3".into();
+        }
+        for _ in 0..2 {
+            h.step();
+        }
+        h.get_by_role_and_label(egui::accesskit::Role::Button, "OK").click();
+        for _ in 0..2 {
+            h.step();
+        }
+        assert_eq!(h.state().dialog.as_ref().map(|d| d.name()), Some("saveChanges"));
+        assert!(h.state().session.doc.plain_text(wordcraft_doc::StoryRef::Body).contains("unsaved"), "nothing merged yet");
+    }
+
     #[test]
     fn paragraph_dialog_sets_a_mixed_check_box_for_all() {
         use egui_kittest::kittest::{NodeT, Queryable};
@@ -4598,6 +4714,32 @@ mod tests {
         for t in &tops {
             assert!((t - tops[0]).abs() <= 0.5, "the tab strip stays put: {tops:?}");
         }
+    }
+
+    /// #3663: "NaN" in the Font dialog's Size box parses as a float; the preview draws at 12 pt
+    /// instead of a NaN size, which tripped epaint's glyph assertion and closed the app.
+    #[test]
+    fn font_dialog_preview_ignores_a_size_that_is_not_a_number() {
+        for (typed, pt) in [("NaN", 12.0), ("nan", 12.0), ("inf", 12.0), ("-infinity", 12.0), ("10.5", 10.5), ("200", 72.0), ("", 12.0)] {
+            assert_eq!(preview_size(typed), pt, "{typed:?}");
+        }
+        let mut app = app_with("Example");
+        let _ = app.run("select.all", json!({}));
+        app.dialog = Dialog::open("font", &mut app);
+        let Some(Dialog::Font { size, .. }) = &mut app.dialog else { panic!("no font dialog") };
+        *size = "NaN".into();
+        let mut h = egui_kittest::Harness::builder().with_size(egui::vec2(1440.0, 900.0)).build_ui_state(
+            |ui, app: &mut WordApp| {
+                let ctx = ui.ctx().clone();
+                app.logic(&ctx);
+                app.ui(ui);
+            },
+            app,
+        );
+        for _ in 0..4 {
+            h.step();
+        }
+        assert!(matches!(&h.state().dialog, Some(Dialog::Font { size, .. }) if size == "NaN"), "the dialog stays open");
     }
 
     #[test]

@@ -332,8 +332,10 @@ fn controls(tab: &str) -> Vec<Control> {
             c("Rules", "mailings.rules"),
             c("Match Fields", "mailings.matchFields"),
             c("Preview Results", "mailings.preview"),
+            p("First Record", "mailings.first", serde_json::json!({})),
             p("Previous Record", "mailings.previous", serde_json::json!({})),
             p("Next Record", "mailings.next", serde_json::json!({})),
+            p("Last Record", "mailings.last", serde_json::json!({})),
             c("Find Recipient", "mailings.findRecipient"),
             c("Check for Errors", "mailings.checkErrors"),
             c("Finish & Merge", "mailings.finish"),
@@ -432,10 +434,10 @@ fn letters_for(app: &WordApp, tab: &str) -> Vec<String> {
         v.extend(own);
         let words: Vec<&str> = ctl.tip.split_whitespace().filter(|w| w.chars().next().is_some_and(|c| c.is_ascii_alphanumeric())).collect();
         if let Some(w) = words.first() {
-            v.extend(w.chars().filter(|c| c.is_ascii_alphanumeric()).map(|c| c.to_ascii_uppercase()));
+            v.extend(w.chars().filter(char::is_ascii_alphanumeric).map(|c| c.to_ascii_uppercase()));
         }
         if words.len() > 1 {
-            v.extend(words.iter().map(|w| w.chars().next().unwrap_or(' ')).filter(|c| c.is_ascii_alphanumeric()).map(|c| c.to_ascii_uppercase()));
+            v.extend(words.iter().map(|w| w.chars().next().unwrap_or(' ')).filter(char::is_ascii_alphanumeric).map(|c| c.to_ascii_uppercase()));
         }
         v
     };
@@ -484,7 +486,7 @@ fn letters_for(app: &WordApp, tab: &str) -> Vec<String> {
             }
         }
     }
-    out.into_iter().map(|o| o.unwrap_or_default()).collect()
+    out.into_iter().map(Option::unwrap_or_default).collect()
 }
 
 /// Pure letter assignment `(tab letters, per-tab control letters)`, for tests without a window.

@@ -221,7 +221,7 @@ pub(crate) fn picture(s: &mut Session, v: &Value) -> CmdResult {
     } else if let Some(path) = p::str(v, "path") {
         crate::io::read_file(path).map_err(CmdError::Failed)?
     } else {
-        s.ui_requests.push(json!({"open": "insertPicture"}));
+        s.push_ui_request(json!({"open": "insertPicture"}));
         return sel_result(s);
     };
     place_picture(s, bytes, p::f32(v, "width"), p::str(v, "alt").unwrap_or(""))
@@ -295,7 +295,7 @@ fn icon(s: &mut Session, v: &Value) -> CmdResult {
             .iter()
             .map(|i| json!({"id": i.id, "name": i.name, "category": i.category.name(), "keywords": i.keywords}))
             .collect();
-        s.ui_requests.push(json!({"open": "icons"}));
+        s.push_ui_request(json!({"open": "icons"}));
         return Ok(json!({"icons": icons}));
     };
     let icon = icon_lib::find(id).ok_or_else(|| CmdError::Params(format!("no icon {id:?} (insert.icon without an id lists them)")))?;
@@ -441,7 +441,7 @@ fn link(s: &mut Session, v: &Value) -> CmdResult {
         None => match place_target(s, v)? {
             Some(t) => t,
             None => {
-                s.ui_requests.push(json!({"open": "link"}));
+                s.push_ui_request(json!({"open": "link"}));
                 return sel_result(s);
             }
         },
@@ -1001,6 +1001,73 @@ fn cover_page(s: &mut Session, v: &Value) -> CmdResult {
     sel_result(s)
 }
 
+/// Why Insert › Drop Cap is off at the caret, as in Word: in a table cell, in an empty paragraph
+/// and in one that starts with a space.
+fn drop_cap_off(s: &Session) -> Option<&'static str> {
+    if s.sel.focus.path.cell().is_some() {
+        return Some("drop caps can't go in a table");
+    }
+    let first = s.doc.para_at(&s.sel.focus).and_then(|p| p.text.chars().next());
+    match first {
+        None => Some("the paragraph is empty"),
+        Some(c) if c.is_whitespace() => Some("the paragraph starts with a space"),
+        Some(_) => None,
+    }
+}
+
+/// Insert › Drop Cap and Drop Cap Options: none, or the letter dropped into the text or hung in
+/// the margin, `lines` tall, `distance` points from the text, in `font` (unset: the text's).
+/// None takes all of it away, the letter's font with it.
+fn drop_cap(s: &mut Session, v: &Value) -> CmdResult {
+    let lines = v.get("lines").and_then(Value::as_f64).filter(|l| l.is_finite());
+    let none = p::str(v, "position") == Some("none") || lines == Some(0.0);
+    let margin = p::str(v, "position") == Some("margin");
+    let lines = lines.map_or(3.0, |l| l.round().clamp(1.0, 10.0)) as u8;
+    let distance = p::f32(v, "distance").map_or(0.0, |d| d.clamp(0.0, wordcraft_doc::resolve::MAX_DROP_CAP_DISTANCE));
+    // A family name, not a paragraph of text.
+    let font = p::str(v, "font").map(str::trim).filter(|f| !f.is_empty()).map(|f| f.chars().take(64).collect::<String>());
+    super::para::fmt(s, &|p| {
+        p.drop_cap = (!none).then_some(lines);
+        p.drop_cap_margin = (!none && margin).then_some(true);
+        p.drop_cap_distance = (!none && distance > 0.0).then_some(distance);
+        p.drop_cap_font = font.clone().filter(|_| !none);
+    })
+}
+
+/// Insert › Drop Cap at the caret: the menu's highlight and the Drop Cap dialog's values.
+#[derive(Clone, Debug, PartialEq)]
+pub struct DropCapState {
+    /// `none`, `dropped` or `margin`.
+    pub position: &'static str,
+    /// Lines to drop (3 when there is no drop cap).
+    pub lines: u8,
+    /// Distance from the text, points.
+    pub distance: f32,
+    /// The letter's own font, if it has one.
+    pub font: Option<String>,
+    /// The font of the paragraph's first character.
+    pub text_font: String,
+}
+
+pub fn drop_cap_state(s: &Session) -> DropCapState {
+    let para = s.doc.para_at(&s.sel.focus);
+    let props = para.map(|p| p.props.clone()).unwrap_or_default();
+    let rp = s.doc.styles.resolve_para(&props);
+    let first = para.map(|p| p.props_at(0).clone()).unwrap_or_default();
+    let text_font = s.doc.styles.resolve_char_in(props.style.as_deref(), None, &first).font;
+    DropCapState {
+        position: match (rp.drop_cap, rp.drop_cap_margin) {
+            (0, _) => "none",
+            (_, true) => "margin",
+            _ => "dropped",
+        },
+        lines: if rp.drop_cap == 0 { 3 } else { rp.drop_cap },
+        distance: if rp.drop_cap == 0 { 0.0 } else { rp.drop_cap_distance },
+        font: rp.drop_cap_font.filter(|_| rp.drop_cap > 0),
+        text_font,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1328,72 +1395,5 @@ mod tests {
         assert_eq!(date_picture(r#"DATE \@ "MMMM d, yyyy" \* MERGEFORMAT"#).as_deref(), Some("MMMM d, yyyy"));
         assert_eq!(date_picture(r#"TIME \@ HH:mm"#).as_deref(), Some("HH:mm"));
         assert_eq!(date_picture("DATE"), None);
-    }
-}
-
-/// Why Insert › Drop Cap is off at the caret, as in Word: in a table cell, in an empty paragraph
-/// and in one that starts with a space.
-fn drop_cap_off(s: &Session) -> Option<&'static str> {
-    if s.sel.focus.path.cell().is_some() {
-        return Some("drop caps can't go in a table");
-    }
-    let first = s.doc.para_at(&s.sel.focus).and_then(|p| p.text.chars().next());
-    match first {
-        None => Some("the paragraph is empty"),
-        Some(c) if c.is_whitespace() => Some("the paragraph starts with a space"),
-        Some(_) => None,
-    }
-}
-
-/// Insert › Drop Cap and Drop Cap Options: none, or the letter dropped into the text or hung in
-/// the margin, `lines` tall, `distance` points from the text, in `font` (unset: the text's).
-/// None takes all of it away, the letter's font with it.
-fn drop_cap(s: &mut Session, v: &Value) -> CmdResult {
-    let lines = v.get("lines").and_then(Value::as_f64).filter(|l| l.is_finite());
-    let none = p::str(v, "position") == Some("none") || lines == Some(0.0);
-    let margin = p::str(v, "position") == Some("margin");
-    let lines = lines.map_or(3.0, |l| l.round().clamp(1.0, 10.0)) as u8;
-    let distance = p::f32(v, "distance").map_or(0.0, |d| d.clamp(0.0, wordcraft_doc::resolve::MAX_DROP_CAP_DISTANCE));
-    // A family name, not a paragraph of text.
-    let font = p::str(v, "font").map(str::trim).filter(|f| !f.is_empty()).map(|f| f.chars().take(64).collect::<String>());
-    super::para::fmt(s, &|p| {
-        p.drop_cap = (!none).then_some(lines);
-        p.drop_cap_margin = (!none && margin).then_some(true);
-        p.drop_cap_distance = (!none && distance > 0.0).then_some(distance);
-        p.drop_cap_font = font.clone().filter(|_| !none);
-    })
-}
-
-/// Insert › Drop Cap at the caret: the menu's highlight and the Drop Cap dialog's values.
-#[derive(Clone, Debug, PartialEq)]
-pub struct DropCapState {
-    /// `none`, `dropped` or `margin`.
-    pub position: &'static str,
-    /// Lines to drop (3 when there is no drop cap).
-    pub lines: u8,
-    /// Distance from the text, points.
-    pub distance: f32,
-    /// The letter's own font, if it has one.
-    pub font: Option<String>,
-    /// The font of the paragraph's first character.
-    pub text_font: String,
-}
-
-pub fn drop_cap_state(s: &Session) -> DropCapState {
-    let para = s.doc.para_at(&s.sel.focus);
-    let props = para.map(|p| p.props.clone()).unwrap_or_default();
-    let rp = s.doc.styles.resolve_para(&props);
-    let first = para.map(|p| p.props_at(0).clone()).unwrap_or_default();
-    let text_font = s.doc.styles.resolve_char_in(props.style.as_deref(), None, &first).font;
-    DropCapState {
-        position: match (rp.drop_cap, rp.drop_cap_margin) {
-            (0, _) => "none",
-            (_, true) => "margin",
-            _ => "dropped",
-        },
-        lines: if rp.drop_cap == 0 { 3 } else { rp.drop_cap },
-        distance: if rp.drop_cap == 0 { 0.0 } else { rp.drop_cap_distance },
-        font: rp.drop_cap_font.filter(|_| rp.drop_cap > 0),
-        text_font,
     }
 }

@@ -583,6 +583,8 @@ pub struct WordApp {
     /// The document (id, revision) whose comment text [`WordApp::ensure_comment_fonts`] last
     /// looked at.
     comment_fonts_for: Option<(u64, u64)>,
+    /// The Recover list's document names [`WordApp::ensure_recover_fonts`] last looked at.
+    recover_fonts_for: Option<u64>,
     /// The list of recent document paths [`WordApp::ensure_recent_fonts`] last looked at.
     recent_fonts_for: Vec<String>,
     /// The Find query and result count [`WordApp::ensure_find_fonts`] last looked at.
@@ -730,6 +732,7 @@ impl WordApp {
             fonts_system_cjk: false,
             want_system_cjk: false,
             comment_fonts_for: None,
+            recover_fonts_for: None,
             recent_fonts_for: Vec::new(),
             find_fonts_for: None,
             fonts_frames: 0,
@@ -1499,10 +1502,33 @@ impl WordApp {
         // Drawing leaves the caret where it was: following it would pull the view off the ink.
         // A mouse drag on a table (`run_keep_view`) does the same (#1738). A caret in an empty
         // story (a footer just made) also spans the whole story: it isn't a selection of it, and
-        // the view follows it.
+        // the view follows it. Saving, exporting, printing, the document's properties and File ›
+        // Options move neither the caret nor the text, so the view stays where the user is
+        // reading (#3864); AutoSave runs its save on the session and never gets here.
+        let file_keeps_view = matches!(
+            id,
+            "file.save"
+                | "file.saveAs"
+                | "file.saveTemplate"
+                | "file.exportPdf"
+                | "file.exportPng"
+                | "file.printPdf"
+                | "file.print"
+                | "file.printMarkup"
+                | "file.properties"
+                | "file.info"
+                | "file.rename"
+                | "file.privacy"
+                | "file.privacyOptions"
+                | "file.setAuthor"
+                | "file.compatibility"
+                | "file.encrypt"
+                | "file.share"
+                | "file.options"
+        );
         if (self.session.selects_whole_story() && !self.session.sel.is_collapsed()) || id == "select.all" || self.canvas.keep_view {
             self.canvas.scroll_to_caret = false;
-        } else if !["ui.", "view.", "document.", "format.state", "draw."].iter().any(|p| id.starts_with(p)) {
+        } else if !file_keeps_view && !["ui.", "view.", "document.", "format.state", "draw."].iter().any(|p| id.starts_with(p)) {
             self.canvas.scroll_to_caret = true;
         }
         for req in std::mem::take(&mut self.session.ui_requests) {
@@ -2133,6 +2159,34 @@ impl WordApp {
         }
     }
 
+    /// File › Recover draws the recovered documents' names with the interface faces too: a
+    /// Chinese name was a row of boxes, an Arabic or Hebrew one likewise. The same treatment as
+    /// the caption (and as the Recent list, `ensure_recent_fonts`): CJK loads the CJK UI font,
+    /// other scripts borrow the document fallback faces. Looked at again only when the names change.
+    fn ensure_recover_fonts(&mut self) {
+        use std::hash::{Hash, Hasher};
+        let docs = self.session.recovery_documents();
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        docs.iter().for_each(|d| d.name.hash(&mut hasher));
+        let key = hasher.finish();
+        if self.recover_fonts_for == Some(key) {
+            return;
+        }
+        self.recover_fonts_for = Some(key);
+        let chars: std::collections::BTreeSet<char> = docs.iter().flat_map(|d| d.name.chars()).collect();
+        if chars.iter().any(|c| wordcraft_fonts::is_cjk(*c)) {
+            self.want_system_cjk = true;
+        }
+        let text: String = chars.into_iter().collect();
+        let new = theme::faces_for_preedit(&text, &self.canvas.ime_faces, theme::caption_char_covered, |c| {
+            wordcraft_fonts::FontDb::global().fallback_for(c, u32::MAX)
+        });
+        if !new.is_empty() {
+            self.canvas.ime_faces.extend(new);
+            self.styled = false;
+        }
+    }
+
     /// Recent documents in Backstage (and the Start screen) show file names and paths with the
     /// interface faces. Borrow document fallback faces for characters in non-Latin scripts (#2067),
     /// as the caption and comments do.
@@ -2265,6 +2319,7 @@ impl WordApp {
         // in this frame (dialog, drop, control channel) is picked up again at the end.
         self.ensure_caption_fonts();
         self.ensure_comment_fonts();
+        self.ensure_recover_fonts();
         self.ensure_recent_fonts();
         self.ensure_find_fonts();
         self.install_ui_fonts(ctx, lang);
@@ -2378,6 +2433,7 @@ impl WordApp {
         // The open above may have changed the file name the caption draws.
         self.ensure_caption_fonts();
         self.ensure_comment_fonts();
+        self.ensure_recover_fonts();
         self.ensure_recent_fonts();
         self.ensure_find_fonts();
         self.install_ui_fonts(ctx, lang);
@@ -2677,7 +2733,7 @@ impl WordApp {
     /// recipient lists (CSV/TSV, spreadsheets, or a text file asked for as one) load as recipients.
     fn drain_inbox(&mut self) {
         let Some(inbox) = self.services.inbox.clone() else { return };
-        let files = std::mem::take(&mut *inbox.lock().unwrap_or_else(|e| e.into_inner()));
+        let files = std::mem::take(&mut *inbox.lock().unwrap_or_else(std::sync::PoisonError::into_inner));
         let mut placed_picture = false;
         for (name, bytes) in files {
             let lower = name.to_ascii_lowercase();
@@ -2711,7 +2767,7 @@ impl WordApp {
     /// otherwise so the focused field's own paste applies (a text field ignores a picture).
     fn drain_pasted(&mut self) {
         let Some(pasted) = self.services.pasted.clone() else { return };
-        let pictures = std::mem::take(&mut *pasted.lock().unwrap_or_else(|e| e.into_inner()));
+        let pictures = std::mem::take(&mut *pasted.lock().unwrap_or_else(std::sync::PoisonError::into_inner));
         let target = paste_target(self.canvas.focused, self.ui.backstage, self.dialog.is_some() || self.file_dialog_open());
         for (_, bytes) in pictures {
             if !target {
@@ -2842,8 +2898,9 @@ pub fn keeps_everything(name: &str) -> bool {
 /// The dialog a user-run command opens when it lacks the input it needs (scripts and agents get
 /// the command's own error or default instead): Select Recipients and Edit Recipient List without
 /// data, Insert Merge Field without a field, Find Recipient without text, the If and Skip
-/// Record If rules (or Rules with no rule at all) without a field, Table Properties without
-/// settings, Symbol and Field without a character or code, and Enclose Characters without a shape.
+/// Record If rules (or Rules with no rule at all) without a field, Finish & Merge and Print
+/// Documents without records, Table Properties without settings, Symbol and Field without a
+/// character or code, and Enclose Characters without a shape.
 fn input_dialog(id: &str, params: &Value) -> Option<&'static str> {
     let has = |k: &str| params.get(k).is_some_and(|v| !v.is_null());
     let rule = params.get("rule").and_then(Value::as_str).map(str::to_ascii_uppercase);
@@ -2858,6 +2915,9 @@ fn input_dialog(id: &str, params: &Value) -> Option<&'static str> {
         "mailings.editRecipients" if !has("rows") => Some("recipientList"),
         "mailings.insertField" if !has("field") => Some("insertMergeField"),
         "mailings.findRecipient" if !has("text") => Some("findRecipient"),
+        // Finish & Merge and Print Documents without records ask which (#3028).
+        "mailings.finish" if !["path", "records", "from", "to"].into_iter().any(has) => Some("mergeRecords"),
+        "mailings.printDocuments" if !["records", "from", "to"].into_iter().any(has) => Some("printRecords"),
         // Symbol without a character and Field without a code show their dialogs (#321).
         "insert.symbol" if !has("char") => Some("symbol"),
         "insert.field" if !has("instr") => Some("field"),
@@ -3011,6 +3071,7 @@ pub(crate) fn discards_document(id: &str, params: &Value) -> bool {
         "file.open" => params.get("path").is_some(),
         "file.recover" => params.get("restore").is_some(),
         "mailings.finish" => params.get("path").and_then(Value::as_str).is_none(),
+        "mailings.printDocuments" => true,
         _ => false,
     }
 }
@@ -3334,6 +3395,46 @@ mod tests {
         frame(&mut cjk);
         assert!(cjk.want_system_cjk, "a CJK file name loads the CJK UI font");
         assert!(cjk.canvas.ime_faces.is_empty(), "CJK collections are not copied into the fallback list");
+    }
+
+    /// File › Recover draws the recovered documents' names with the interface faces: a Chinese
+    /// name there was a row of boxes because nothing asked for the CJK UI font. (The Recent list
+    /// has its own, `ensure_recent_fonts`.)
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn non_latin_names_in_the_recover_list_get_a_face() {
+        let with_copy = |name: &str| {
+            let root = std::env::temp_dir().join(format!(
+                "wordcraft-recover-fonts-{}-{}",
+                std::process::id(),
+                std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+            ));
+            let id = "0123456789abcdef0123456789abcdef";
+            std::fs::create_dir_all(root.join(id)).unwrap();
+            let snapshot = json!({
+                "version": 1, "generation": 1, "info": {"id": id, "name": name, "savedAt": "2026-10-11T10:42:00Z"},
+                "document": wordcraft_doc::Document::from_text("Recovered work")
+            });
+            std::fs::write(root.join(id).join("snapshot-00000000000000000001.json"), serde_json::to_vec(&snapshot).unwrap()).unwrap();
+            let mut a = app();
+            a.session.enable_recovery(root.clone(), std::sync::Arc::new(|| {})).unwrap();
+            let ctx = egui::Context::default();
+            let end = std::time::Instant::now() + std::time::Duration::from_secs(10);
+            loop {
+                ctx.run_ui(egui::RawInput::default(), |ui| a.logic(ui.ctx())).drop_without_applying_deltas();
+                if a.session.recovery_ready() && !a.session.recovery_documents().is_empty() {
+                    // One more frame looks at the names it found.
+                    ctx.run_ui(egui::RawInput::default(), |ui| a.logic(ui.ctx())).drop_without_applying_deltas();
+                    break;
+                }
+                assert!(std::time::Instant::now() < end, "the recovery copy was never found");
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+            let _ = std::fs::remove_dir_all(&root);
+            a
+        };
+        assert!(!with_copy("Synthetic draft").want_system_cjk, "Latin names need no CJK font");
+        assert!(with_copy("会议记录-草稿").want_system_cjk, "a CJK name in Recover loads the CJK UI font");
     }
 
     /// Comment balloons draw comment text and author names with the interface faces, which have
@@ -5247,6 +5348,50 @@ mod tests {
         assert_eq!(a.session.sel.focus.story, wordcraft_doc::StoryRef::Part(footer), "editing the clicked page's footer");
         assert_eq!(a.session.page_hint, last, "on the clicked page");
         assert!((a.canvas.scroll_offset.y - before.y).abs() < 1.0, "the view stays put: {before:?} -> {:?}", a.canvas.scroll_offset);
+    }
+
+    /// #3734: `ui.resize` refuses sizes that aren't positive and clamps the rest to a window the
+    /// GPU can draw, replying with the size it asked for.
+    #[test]
+    fn control_resize_rejects_bad_sizes_and_clamps_huge_ones() {
+        let ctx = egui::Context::default();
+        let mut a = app();
+        let mut resize = |params: Value| {
+            let (req, _reply) = ControlRequest::new("ui.resize", params);
+            let mut reply = Value::Null;
+            let out = ctx.run_ui(egui::RawInput::default(), |ui| {
+                let control::Outcome::Done(v) = control::handle(&mut a, ui.ctx(), &req) else { panic!("ui.resize replies at once") };
+                reply = v;
+            });
+            let sent: Vec<egui::Vec2> = out
+                .viewport_output
+                .values()
+                .flat_map(|v| v.commands.iter())
+                .filter_map(|c| if let egui::ViewportCommand::InnerSize(s) = c { Some(*s) } else { None })
+                .collect();
+            out.drop_without_applying_deltas();
+            (reply, sent)
+        };
+        // 1e300 is past f32: infinite once read, so refused too.
+        for bad in [
+            json!({"width": -5, "height": 600}),
+            json!({"width": 0, "height": 0}),
+            json!({"width": 1200, "height": -1}),
+            json!({"width": 1e300, "height": 600}),
+        ] {
+            let (v, sent) = resize(bad.clone());
+            assert_eq!(v["ok"], false, "{bad} is refused: {v}");
+            assert!(sent.is_empty(), "{bad} sends no size: {sent:?}");
+        }
+        let max = ctx.input(|i| i.max_texture_side) as f32 / ctx.pixels_per_point();
+        let (v, sent) = resize(json!({"width": 1e9, "height": 600}));
+        assert_eq!(sent, [egui::vec2(max, 600.0)], "{v}");
+        assert_eq!(v["result"], json!({"width": max, "height": 600.0}));
+        let (v, sent) = resize(json!({"width": 10, "height": 10}));
+        assert_eq!(sent, [window_geometry::MIN_SIZE], "{v}");
+        let (v, sent) = resize(json!({"width": 1200, "height": 800}));
+        assert_eq!(sent, [egui::vec2(1200.0, 800.0)]);
+        assert_eq!(v["result"], json!({"width": 1200.0, "height": 800.0}));
     }
 
     /// The control channel's `ui.wheel` scrolls the canvas like a mouse wheel over it.
@@ -7361,14 +7506,28 @@ mod tests {
         assert_eq!(reply.get("result").and_then(|r| r.get("status")).and_then(Value::as_str), Some("current"));
     }
 
-    const MAILINGS: [&str; 3] = ["mailings.envelopes", "mailings.labels", "mailings.finish"];
+    const MAILINGS: [&str; 4] = ["mailings.envelopes", "mailings.labels", "mailings.finish", "mailings.printDocuments"];
 
     /// What the user gave: Envelopes and Labels without anything open their dialogs (#407).
     fn mailing(id: &str) -> Value {
         match id {
             "mailings.envelopes" => json!({"delivery": "Ada"}),
             "mailings.labels" => json!({"text": "Ada"}),
-            _ => json!({}),
+            _ => json!({"records": "all"}),
+        }
+    }
+
+    /// #3028: Finish & Merge and Print Documents from the ribbon ask which records first; with
+    /// records given (scripts, the dialog's OK) they merge.
+    #[test]
+    fn finish_and_print_documents_ask_which_records() {
+        let mut a = app();
+        a.run("mailings.recipients", json!({"csv": "Name\nAda\nAlan"})).unwrap();
+        for (id, dialog) in [("mailings.finish", "mergeRecords"), ("mailings.printDocuments", "printRecords")] {
+            assert_eq!(a.run(id, json!({})).unwrap(), json!({"pending": dialog}));
+            assert_eq!(prompt(&a), Some(dialog));
+            assert!(matches!(&a.dialog, Some(dialogs::Dialog::MergeRecords { from, to, .. }) if from == "1" && to == "2"));
+            a.dialog = None;
         }
     }
 
@@ -7399,7 +7558,7 @@ mod tests {
         // A `path` that isn't text merges into a new document, like no path at all.
         let mut a = typed();
         a.run("mailings.recipients", json!({"csv": "Name\nAda"})).unwrap();
-        a.run("mailings.finish", json!({"path": null})).unwrap();
+        a.run("mailings.finish", json!({"path": null, "records": "all"})).unwrap();
         assert_eq!(prompt(&a), Some("saveChanges"));
     }
 
@@ -8950,6 +9109,46 @@ mod tests {
         assert!(!a.canvas.scroll_to_caret, "switching tabs left the view alone");
         a.run("text.insert", json!({"text": "x"})).unwrap();
         assert!(a.canvas.scroll_to_caret, "typing still brings the caret into view");
+    }
+
+    /// #3864: Save (Ctrl+S, the Save button) jumped the view back to the caret, pages away from
+    /// where the user was reading. Saving, exporting, printing and the document's properties move
+    /// neither the caret nor the text, so the view stays, as in Word; opening another document
+    /// still shows its caret.
+    #[test]
+    fn saving_and_exporting_keep_the_view_where_it_is() {
+        let dir = scratch("save-keeps-view");
+        let path = |name: &str| dir.join(name).to_string_lossy().to_string();
+        let mut a = typed();
+        let keeps_view = |a: &mut WordApp, id: &str, params: Value| {
+            a.canvas.scroll_to_caret = false;
+            let r = a.run(id, params);
+            assert!(r.is_ok(), "{id}: {r:?}");
+            assert!(!a.canvas.scroll_to_caret, "{id} scrolled to the caret");
+        };
+        keeps_view(&mut a, "file.saveAs", json!({"path": path("report.docx")}));
+        a.run("text.insert", json!({"text": "x"})).unwrap();
+        keeps_view(&mut a, "file.save", json!({}));
+        keeps_view(&mut a, "file.encrypt", json!({"password": "hunter2"}));
+        keeps_view(&mut a, "file.exportPdf", json!({"path": path("report.pdf")}));
+        keeps_view(&mut a, "file.exportPng", json!({"path": path("report.png")}));
+        keeps_view(&mut a, "file.printPdf", json!({"path": path("printed.pdf")}));
+        keeps_view(&mut a, "file.saveTemplate", json!({"path": path("report.dotx")}));
+        keeps_view(&mut a, "file.print", json!({}));
+        keeps_view(&mut a, "file.printMarkup", json!({"value": true}));
+        keeps_view(&mut a, "file.properties", json!({"title": "Quarterly report"}));
+        keeps_view(&mut a, "file.info", json!({}));
+        keeps_view(&mut a, "file.rename", json!({"name": "renamed"}));
+        keeps_view(&mut a, "file.privacyOptions", json!({"removeDateTime": true}));
+        keeps_view(&mut a, "file.privacy", json!({}));
+        keeps_view(&mut a, "file.setAuthor", json!({"name": "Ada"}));
+        keeps_view(&mut a, "file.compatibility", json!({}));
+        keeps_view(&mut a, "file.share", json!({}));
+        keeps_view(&mut a, "file.options", json!({"checkSpelling": false}));
+        a.canvas.scroll_to_caret = false;
+        a.execute("file.new", json!({})).unwrap();
+        assert!(a.canvas.scroll_to_caret, "a new document still shows its caret");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// Go to Footer into a footer just made — empty, so the caret at its start also "selects the

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Merge WordCraft's main into LawCraft's main (run by .github/workflows/sync.yml).
 #
-# Resolves the conflicts LawCraft expects on every merge: interface catalogs (both sides' rows),
+# Resolves the conflicts LawCraft expects on every merge: LawCraft's own interface catalogs (LawCraft's),
 # README.md and NOTICE (LawCraft's), Cargo.lock (WordCraft's, then cargo adds LawCraft's crates
 # back). Any other conflict stops the merge and reports the files on $GITHUB_OUTPUT.
 set -euo pipefail
@@ -19,7 +19,7 @@ msg="Merge WordCraft main ($(git rev-parse --short upstream/main))"
 if ! git merge --no-edit -m "$msg" upstream/main; then
   while IFS= read -r f; do
     case "$f" in
-      crates/ui-egui/src/i18n/*.tsv) python3 .github/sync/union.py "$f" && git add -- "$f" ;;
+      crates/ui-egui/lawcraft-i18n/*.tsv) git checkout --ours -- "$f" && git add -- "$f" ;;
       README.md | NOTICE) git checkout --ours -- "$f" && git add -- "$f" ;;
       Cargo.lock) git checkout --theirs -- "$f" && git add -- "$f" ;;
     esac

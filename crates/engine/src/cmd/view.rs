@@ -91,12 +91,12 @@ pub fn specs() -> Vec<CommandSpec> {
         // light and dark, as the manual switch did.
         CommandSpec::new("view.interfaceTheme", "Interface Theme", "View › Dark Mode", |s, v| match v.get("value") {
             None => {
-                s.ui_requests.push(json!({"toggle": "interfaceTheme"}));
+                s.push_ui_request(json!({"toggle": "interfaceTheme"}));
                 Ok(json!({"value": "toggle"}))
             }
             Some(Value::String(name)) => match name.as_str() {
                 "light" | "dark" | "system" => {
-                    s.ui_requests.push(json!({"interfaceTheme": name}));
+                    s.push_ui_request(json!({"interfaceTheme": name}));
                     Ok(json!({"value": name}))
                 }
                 _ => Err(CmdError::Params("interface theme: light|dark|system".into())),
@@ -121,12 +121,12 @@ pub fn specs() -> Vec<CommandSpec> {
         .params(r#"{"value"?: bool}"#)
         .pure(),
         CommandSpec::new("view.newWindow", "New Window", "View › Window", |s, _| {
-            s.ui_requests.push(json!({"open": "newWindow"}));
+            s.push_ui_request(json!({"open": "newWindow"}));
             sel_result(s)
         })
         .pure(),
         CommandSpec::new("view.split", "Split", "View › Window", |s, _| {
-            s.ui_requests.push(json!({"toggle": "split"}));
+            s.push_ui_request(json!({"toggle": "split"}));
             sel_result(s)
         })
         .key("Mod+Alt+S")
@@ -141,8 +141,8 @@ pub fn specs() -> Vec<CommandSpec> {
             .pure(),
         CommandSpec::new("view.state", "View State", "View", |s, _| serde_json::to_value(&s.view).map_err(|e| CmdError::Failed(e.to_string())))
             .pure(),
-        // Word › File › Options › Advanced › Numeral: how digits look on screen (display
-        // only; the document text keeps the typed codepoints).
+        // Word › File › Options › Advanced › Numeral: how digits look on screen, in print, PDFs
+        // and page images (display only; the document text keeps the typed codepoints).
         CommandSpec::new("view.numeral", "Numerals", "File › Options › Advanced", |s, v| match v.get("value") {
             None => Ok(json!({"value": s.view.numeral})),
             Some(Value::String(name)) => {
@@ -256,7 +256,7 @@ fn zoom(s: &mut Session, v: &Value) -> CmdResult {
             s.view.multi_page = false;
         }
         None => {
-            s.ui_requests.push(json!({"open": "zoom"}));
+            s.push_ui_request(json!({"open": "zoom"}));
         }
     }
     Ok(json!({"zoom": s.view.zoom, "fit": s.view.fit}))

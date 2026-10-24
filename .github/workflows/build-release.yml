@@ -212,6 +212,8 @@ jobs:
         uses: storytold/craft-common-actions/actions/checkout-craft-fonts@a4acae8e3a54b0c198c9f22fe4f4197ffd9f58b8 # craft-common-actions main, 2026-10-22
         with:
           ref: ${{ inputs.craft-fonts-ref }}
+      - name: Check out craft-i18n
+        uses: storytold/craft-common-actions/actions/checkout-craft-i18n@9e42334399655e6838f234c912d29c0697cad477 # craft-common-actions main, 2026-10-24
       - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
         with:
           toolchain: stable
@@ -347,6 +349,8 @@ jobs:
         uses: storytold/craft-common-actions/actions/checkout-craft-fonts@a4acae8e3a54b0c198c9f22fe4f4197ffd9f58b8 # craft-common-actions main, 2026-10-22
         with:
           ref: ${{ inputs.craft-fonts-ref }}
+      - name: Check out craft-i18n
+        uses: storytold/craft-common-actions/actions/checkout-craft-i18n@9e42334399655e6838f234c912d29c0697cad477 # craft-common-actions main, 2026-10-24
       - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
         with:
           toolchain: stable
@@ -450,6 +454,8 @@ jobs:
         uses: storytold/craft-common-actions/actions/checkout-craft-fonts@a4acae8e3a54b0c198c9f22fe4f4197ffd9f58b8 # craft-common-actions main, 2026-10-22
         with:
           ref: ${{ inputs.craft-fonts-ref }}
+      - name: Check out craft-i18n
+        uses: storytold/craft-common-actions/actions/checkout-craft-i18n@9e42334399655e6838f234c912d29c0697cad477 # craft-common-actions main, 2026-10-24
       - uses: storytold/craft-common-actions/actions/install-linux-deps@a4acae8e3a54b0c198c9f22fe4f4197ffd9f58b8 # craft-common-actions main, 2026-10-22
         with:
           deb-arch: ${{ matrix.deb }}
@@ -601,6 +607,8 @@ jobs:
         uses: storytold/craft-common-actions/actions/checkout-craft-fonts@a4acae8e3a54b0c198c9f22fe4f4197ffd9f58b8 # craft-common-actions main, 2026-10-22
         with:
           ref: ${{ inputs.craft-fonts-ref }}
+      - name: Check out craft-i18n
+        uses: storytold/craft-common-actions/actions/checkout-craft-i18n@9e42334399655e6838f234c912d29c0697cad477 # craft-common-actions main, 2026-10-24
       - name: Start the FreeBSD VM
         uses: vmactions/freebsd-vm@c46abacb49f09938ca4e1702d15d836285d694cc # v1.5.9
         with:
@@ -644,6 +652,7 @@ jobs:
           git config --global --add safe.directory "*"
           if [ -n "$INPUT_VERSION" ]; then cargo xtask version set "$VERSION" || cargo run -q -p xtask -- version set "$VERSION"; fi
           export CRAFT_FONTS_DIR="$PWD/craft-fonts" CRAFT_FONTS_REQUIRED=1
+          if [ -f craft-i18n.rev ]; then export CRAFT_I18N_DIR="$PWD/craft-i18n" CRAFT_I18N_REQUIRED=1; fi
           if [ -f packaging/freebsd/package.sh ]; then
             bash packaging/freebsd/package.sh
           else
@@ -843,6 +852,8 @@ jobs:
         uses: storytold/craft-common-actions/actions/checkout-craft-fonts@a4acae8e3a54b0c198c9f22fe4f4197ffd9f58b8 # craft-common-actions main, 2026-10-22
         with:
           ref: ${{ inputs.craft-fonts-ref }}
+      - name: Check out craft-i18n
+        uses: storytold/craft-common-actions/actions/checkout-craft-i18n@9e42334399655e6838f234c912d29c0697cad477 # craft-common-actions main, 2026-10-24
       - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
         with:
           toolchain: stable

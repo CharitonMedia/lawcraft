@@ -45,7 +45,7 @@ pub fn specs() -> Vec<CommandSpec> {
                 validate_section(&mut new)?;
                 return with_sect(s, |x| *x = new.clone());
             }
-            s.ui_requests.push(json!({"open": "pageSetup"}));
+            s.push_ui_request(json!({"open": "pageSetup"}));
             Ok(serde_json::to_value(sect(s)).unwrap_or(Value::Null))
         })
         .params(r#"{"section"?: SectionProps} (replaces the whole section, headers and footers included; checked like Size, Margins, Columns, Line Numbers, Footnotes and Page Borders: non-finite numbers and margins that leave no room for text are refused; page sides 7.2–1584 pt, 1–12 columns with 0–300 pt gaps, header/footer/gutter 0–1584 pt, page border width 0.25–6 pt and distance 0–31 pt, note start 1–32767, line numbers start 1–32767, countBy 1–100, distance 0–1584 pt are clamped)"#),

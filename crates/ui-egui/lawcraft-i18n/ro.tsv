@@ -1,0 +1,15 @@
+# LawCraft's own interface strings for ro, added to WordCraft's catalog by build.rs.
+# Same format as craft-i18n's catalogs: context <TAB> English <TAB> translation.
+	Add-ins	Programe de completare
+	No add-ins are installed.	Nu este instalat niciun program de completare.
+	Each add-in stays off until you turn it on.	Fiecare program de completare rămâne dezactivat până când îl activați.
+	PDF import	Import PDF
+	The PDF is now an editable copy. Save it as a new document; the original PDF has not changed.	PDF-ul este acum o copie editabilă. Salvați-o ca document nou; PDF-ul original nu s-a modificat.
+	PDF imported as an editable copy.	PDF importat ca o copie editabilă.
+	PDF layout is reconstructed approximately. Tables, columns, forms, links, annotations and document structure are not reconstructed.	Aspectul PDF-ului este refăcut aproximativ. Tabelele, coloanele, formularele, linkurile, adnotările și structura documentului nu sunt refăcute.
+	Some pages have no extractable text. Their pictures remain images; OCR is not performed.	Unele pagini nu au text care poate fi extras. Imaginile lor rămân imagini; nu se face recunoaștere optică a caracterelor (OCR).
+	Vector drawings, rules and decorative backgrounds are not imported.	Desenele vectoriale, liniile și fundalurile decorative nu sunt importate.
+	Some characters have no usable Unicode mapping and were replaced with �.	Unele caractere nu au o corespondență Unicode utilizabilă și au fost înlocuite cu �.
+	Rotated, right-to-left or unusually positioned content needs review after conversion to horizontal text and inline pictures.	Verificați conținutul rotit, de la dreapta la stânga sau poziționat neobișnuit după conversia în text orizontal și imagini în linie cu textul.
+	The PDF interpreter reported unsupported or unreadable content; inspect the converted document.	Interpretorul PDF a semnalat conținut neacceptat sau ilizibil; verificați documentul convertit.
+	To protect the converted document, set a password when saving it. The PDF password only unlocks the source.	Pentru a proteja documentul convertit, setați o parolă când îl salvați. Parola PDF-ului deblochează doar fișierul sursă.

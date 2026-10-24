@@ -125,7 +125,7 @@ use wordcraft_geom::Rect;
 use wordcraft_layout::display::Paint;
 use wordcraft_layout::display::{DisplayOptions, Draw, Stroke as LineStyle, page_display};
 use wordcraft_layout::para::{ClKind, LineEnd};
-use wordcraft_layout::{DocLayout, LayoutCache, LayoutOptions, Page, Placed, layout};
+use wordcraft_layout::{DocLayout, LayoutCache, LayoutOptions, NumeralMode, Page, Placed, layout};
 use wordcraft_metafile::{Picture, PlacedItem};
 
 /// Largest page side we write (200", the PDF limit).
@@ -170,11 +170,24 @@ pub struct PdfOptions {
     /// is scaled to fit and centred, the paper turned to the page's orientation (Scale to paper
     /// size, #2108). `None` keeps the document's page sizes.
     pub paper: Option<(f32, f32)>,
+    /// How [`export`] shows digits (the Numeral setting; callers resolve `System`, see
+    /// [`NumeralMode::resolve`]). [`export_layout`] keeps the layout it is given.
+    pub numeral: NumeralMode,
 }
 
 impl Default for PdfOptions {
     fn default() -> Self {
-        PdfOptions { pages: None, title: None, author: None, tagged: true, include_markup: false, comments: false, compress: true, paper: None }
+        PdfOptions {
+            pages: None,
+            title: None,
+            author: None,
+            tagged: true,
+            include_markup: false,
+            comments: false,
+            compress: true,
+            paper: None,
+            numeral: NumeralMode::Arabic,
+        }
     }
 }
 
@@ -183,7 +196,7 @@ impl Default for PdfOptions {
 /// markup area with the comment balloons.
 pub fn export(doc: &Document, opts: &PdfOptions) -> Result<Vec<u8>, PdfError> {
     write::guard(|| {
-        let lo = LayoutOptions { hide_deleted: !opts.include_markup, comment_balloons: opts.comments, ..Default::default() };
+        let lo = LayoutOptions { hide_deleted: !opts.include_markup, comment_balloons: opts.comments, numeral: opts.numeral, ..Default::default() };
         let lay = layout(doc, &mut LayoutCache::new(), &lo);
         export_layout_inner(doc, &lay, opts)
     })

@@ -1285,6 +1285,67 @@ pub fn text_table_cells(lines: &[String], sep: Option<char>, columns: Option<usi
     (rows, cols)
 }
 
+/// The cells Convert Text to Table makes of `paras`, row by row, and the column count, as
+/// [`text_table_cells`] makes them of their text. Each cell is its field of the source paragraph
+/// cut out of it, trimmed of surrounding white space, so its formatting, objects (pictures,
+/// fields, notes…) and tracked changes go with it.
+fn text_table_paras(paras: Vec<Paragraph>, sep: Option<char>, columns: Option<usize>) -> Result<(Vec<Vec<Paragraph>>, usize), CmdError> {
+    use wordcraft_doc::para::OBJ;
+    use wordcraft_doc::table::MAX_COLS;
+    // Each paragraph's fields as byte ranges; an object is never a separator.
+    let fields: Vec<Vec<std::ops::Range<usize>>> = paras
+        .iter()
+        .map(|p| {
+            let mut out = Vec::new();
+            let mut from = 0;
+            if let Some(sep) = sep.filter(|c| *c != OBJ) {
+                for (i, c) in p.text.char_indices().filter(|(_, c)| *c == sep) {
+                    out.push(from..i);
+                    from = i + c.len_utf8();
+                }
+            }
+            out.push(from..p.text.len());
+            out
+        })
+        .collect();
+    let cols = match sep {
+        None => columns.unwrap_or(1).clamp(1, MAX_COLS),
+        Some(_) => columns.unwrap_or_else(|| fields.iter().map(Vec::len).max().unwrap_or(1)).max(1),
+    };
+    let per_row = cols.min(MAX_COLS);
+    let mut rows: Vec<Vec<Paragraph>> = Vec::new();
+    let mut row: Vec<Paragraph> = Vec::new();
+    for (mut work, ranges) in paras.into_iter().zip(fields) {
+        // The section break stays out of the cells.
+        work.section = None;
+        let mut pieces = Vec::with_capacity(ranges.len());
+        // Last field first, so the earlier offsets stay valid.
+        for r in ranges.into_iter().rev() {
+            let field = work.text.get(r.clone()).unwrap_or("");
+            let start = r.start + (field.len() - field.trim_start().len());
+            let end = (r.start + field.trim_end().len()).max(start);
+            let mut piece = work.split_off(start)?;
+            piece.split_off(end - start)?;
+            pieces.push(piece);
+        }
+        pieces.reverse();
+        for piece in pieces {
+            row.push(piece);
+            if row.len() == per_row {
+                rows.push(std::mem::take(&mut row));
+            }
+        }
+        // With a separator, each paragraph starts a row.
+        if sep.is_some() && !row.is_empty() {
+            rows.push(std::mem::take(&mut row));
+        }
+    }
+    if !row.is_empty() {
+        rows.push(row);
+    }
+    Ok((rows, cols))
+}
+
 /// Word's largest Initial column width, 22 in, in points.
 const MAX_INITIAL_WIDTH: f64 = 22.0 * 72.0;
 
@@ -1316,8 +1377,10 @@ fn from_text(s: &mut Session, v: &Value) -> CmdResult {
     };
     let columns = p::u64(v, "columns").map(|n| n.clamp(1, wordcraft_doc::table::MAX_COLS as u64) as usize);
     let (a, b) = s.sel.ordered();
-    let lines = text_table_lines(s)?;
-    let (cells, cols) = text_table_cells(&lines, sep, columns);
+    // Checks the selection: only paragraphs, a table between them is refused.
+    text_table_lines(s)?;
+    let paras: Vec<Paragraph> = (a.path.last()..=b.path.last()).filter_map(|i| s.doc.para(a.story, &a.path.with_last(i)).cloned()).collect();
+    let (cells, cols) = text_table_paras(paras, sep, columns)?;
     // A table has at most 63 columns; a longer row would lose its last fields.
     if cols > wordcraft_doc::table::MAX_COLS {
         return Err(CmdError::Failed("a table can have at most 63 columns".into()));
@@ -1333,10 +1396,10 @@ fn from_text(s: &mut Session, v: &Value) -> CmdResult {
         t.grid.iter_mut().for_each(|w| *w = col_width);
         t.rows.iter_mut().flat_map(|row| row.cells.iter_mut()).for_each(|c| c.props.width = Some(col_width));
     }
-    for (r, l) in cells.iter().enumerate() {
-        for (c, txt) in l.iter().enumerate() {
+    for (r, l) in cells.into_iter().enumerate() {
+        for (c, para) in l.into_iter().enumerate() {
             if let Some(cl) = t.rows.get_mut(r).and_then(|row| row.cells.get_mut(c)) {
-                cl.blocks = vec![para_block(Paragraph::with_text(txt.trim(), Default::default()))];
+                cl.blocks = vec![para_block(para)];
             }
         }
     }

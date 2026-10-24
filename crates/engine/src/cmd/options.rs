@@ -224,7 +224,7 @@ fn options(s: &mut Session, v: &Value) -> CmdResult {
         // Marks, hidden text and proofing change what is laid out.
         s.relayout();
     } else {
-        s.ui_requests.push(json!({"open": "options", "pane": pane}));
+        s.push_ui_request(json!({"open": "options", "pane": pane}));
     }
     let mut r = current(s);
     if let Some(o) = r.as_object_mut() {

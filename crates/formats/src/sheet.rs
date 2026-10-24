@@ -788,7 +788,7 @@ fn iso_datetime(v: &str) -> Option<String> {
     let y: i64 = it.next()?.parse().ok()?;
     let m: u32 = it.next()?.parse().ok()?;
     let d_part = it.next()?;
-    let d_digits: String = d_part.chars().take_while(|c| c.is_ascii_digit()).collect();
+    let d_digits: String = d_part.chars().take_while(char::is_ascii_digit).collect();
     let d: u32 = d_digits.parse().ok()?;
     if !(1..=12).contains(&m) || !(1..=31).contains(&d) {
         return None;

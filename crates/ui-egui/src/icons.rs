@@ -854,6 +854,12 @@ pub fn paint(p: &Painter, r: Rect, name: &str, c: Color32, accent: Color32) {
             let pts: &[(f32, f32)] =
                 if name == "next" || name == "last" { &[(7.0, 4.0), (13.0, 10.0), (7.0, 16.0)] } else { &[(13.0, 4.0), (7.0, 10.0), (13.0, 16.0)] };
             pen.line_c(pts, a);
+            // First and Last: a bar at the end the chevron points to.
+            match name {
+                "first" => pen.line_c(&[(5.0, 4.0), (5.0, 16.0)], a),
+                "last" => pen.line_c(&[(15.0, 4.0), (15.0, 16.0)], a),
+                _ => {}
+            }
         }
         "finish" => {
             pen.page(3.0, 2.0, 13.0, 15.0);

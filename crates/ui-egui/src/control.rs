@@ -282,8 +282,13 @@ pub fn handle(app: &mut WordApp, ctx: &egui::Context, req: &ControlRequest) -> O
         }
         "ui.resize" => {
             let (Some(w), Some(h)) = (f("width"), f("height")) else { return err("missing width/height") };
-            ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(w, h)));
-            ok(json!({}))
+            // The window's surface is a GPU texture: no side may pass the largest one (#3734).
+            let max_side = ctx.input(|i| i.max_texture_side) as f32 / ctx.pixels_per_point();
+            let Some(size) = crate::window_geometry::requested_size(egui::vec2(w, h), max_side) else {
+                return err("width and height must be positive numbers no larger than 3.4e38");
+            };
+            ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(size));
+            ok(json!({"width": size.x, "height": size.y}))
         }
         "ui.focus" => {
             ctx.send_viewport_cmd(egui::ViewportCommand::Focus);

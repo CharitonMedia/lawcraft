@@ -7,6 +7,23 @@ use wordcraft_doc::{PartKind, StoryRef};
 use crate::theme::{Tokens, TypeRung, fit_text, medium, paint_text, regular, semibold, text_width};
 use crate::{WordApp, icons};
 
+/// Why the caret's language isn't spell-checked (dictionary unreadable or missing), if it isn't.
+pub(crate) fn dictionary_problem(lang: &str, unreadable: &Option<(std::path::PathBuf, String)>, missing: Option<&str>) -> Option<String> {
+    match (unreadable, missing) {
+        (Some((file, reason)), _) => Some(crate::i18n::fmt(
+            tl!("The spelling dictionary for {language} couldn't be read, so it isn't checked. File: {file}. Reason: {reason}"),
+            &[("language", lang), ("file", &file.to_string_lossy()), ("reason", reason)],
+        )),
+        (None, Some(name)) => Some(crate::i18n::fmt(
+            tl!(
+                "No spelling dictionary for {language} is installed, so it isn't checked. WordCraft looks for the Hunspell dictionary {name} in the WORDCRAFT_DICTIONARIES folder and in the usual system locations."
+            ),
+            &[("language", lang), ("name", name)],
+        )),
+        (None, None) => None,
+    }
+}
+
 /// The Quick Access Toolbar's button for command `id`.
 pub(crate) fn qat_button_id(id: &str) -> egui::Id {
     egui::Id::new(("qat_button", id))
@@ -537,7 +554,10 @@ pub fn status_bar(app: &mut WordApp, ui: &mut Ui) {
             ui.horizontal_centered(|ui| {
                 ui.spacing_mut().item_spacing = vec2(14.0, 0.0);
                 let l = app.session.layout();
-                let page = if app.session.selects_whole_story() {
+                let page = if let Some(p) = app.canvas.viewed_page {
+                    // The page in view (#3880), as the scrollbar's tip names it.
+                    p.min(l.pages.len().saturating_sub(1)) + 1
+                } else if app.session.selects_whole_story() {
                     app.session.page_hint.min(l.pages.len().saturating_sub(1)) + 1
                 } else {
                     l.caret_on(&app.session.sel.focus, app.session.page_hint).map(|c| c.page + 1).unwrap_or(1)
@@ -587,17 +607,7 @@ pub fn status_bar(app: &mut WordApp, ui: &mut Ui) {
                 } else {
                     lang.clone()
                 };
-                let tip = match (&unreadable, missing) {
-                    (Some((file, reason)), _) => crate::i18n::fmt(
-                        tl!("The spelling dictionary for {language} couldn't be read, so it isn't checked. File: {file}. Reason: {reason}"),
-                        &[("language", &lang), ("file", &file.to_string_lossy()), ("reason", reason)],
-                    ),
-                    (None, Some(name)) => crate::i18n::fmt(
-                        tl!("No spelling dictionary for {language} is installed, so it isn't checked. WordCraft looks for the Hunspell dictionary {name} in the WORDCRAFT_DICTIONARIES folder and in the usual system locations."),
-                        &[("language", &lang), ("name", name)],
-                    ),
-                    (None, None) => tl!("Language").to_string(),
-                };
+                let tip = dictionary_problem(&lang, &unreadable, missing).unwrap_or_else(|| tl!("Language").to_string());
                 let resp = st(ui, &shown).on_hover_text(tip);
                 egui::Popup::menu(&resp).show(|ui| {
                     ui.set_min_width(200.0);

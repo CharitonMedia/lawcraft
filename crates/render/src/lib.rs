@@ -181,7 +181,7 @@ impl<T: Clone> MediaCache<T> {
 }
 
 fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
-    m.lock().unwrap_or_else(|e| e.into_inner())
+    m.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 fn images() -> &'static Mutex<MediaCache<Option<Arc<Pixmap>>>> {
@@ -1708,6 +1708,54 @@ mod tests {
             }
         }
         assert!(ink > 100, "the borders are drawn: {ink}");
+    }
+
+    /// #2946: a dimmed header's items are faded as one group, so two of its lines that cross come
+    /// out the same tone as the lines themselves, and so does a border two cells share. Faded item
+    /// by item, the crossing kept 0.55² of the background instead of 0.55, and a shared border read
+    /// darker than the outer ones.
+    #[test]
+    fn dimmed_header_borders_keep_one_tone_where_they_meet() {
+        let mut d = Document::from_text("Body");
+        // Two rows and two columns: the middle border is drawn by both cells beside it, and a cell's
+        // top and left rules cross at its top-left corner.
+        let header = vec![std::sync::Arc::new(wordcraft_doc::Block::Table(wordcraft_doc::Table::new(2, 2, 300.0)))];
+        let id = d.add_part(wordcraft_doc::PartKind::Header, header);
+        d.last_section.headers.default = Some(id);
+        let l = layout(&d, &mut LayoutCache::new(), &LayoutOptions::default());
+        let page = &l.pages[0];
+        let rules: Vec<(f32, f32, f32, f32)> = page
+            .header
+            .iter()
+            .filter_map(|it| if let wordcraft_layout::Placed::Rule { x0, y0, x1, y1, .. } = it { Some((*x0, *y0, *x1, *y1)) } else { None })
+            .collect();
+        let (vx, vy0, _, vy1) = *rules.iter().filter(|(x0, _, x1, _)| x0 == x1).min_by(|a, b| a.0.total_cmp(&b.0)).expect("a vertical rule");
+        let (hx0, hy, hx1, _) =
+            *rules.iter().find(|(_, y0, _, y1)| y0 == y1 && (y0 - vy0).abs() < 0.01).expect("the horizontal rule at the cell's top");
+        assert!(hx0 <= vx && vx <= hx1 && vy0 <= hy && hy <= vy1, "the rules cross: ({hx0}, {hy}, {hx1}) across ({vx}, {vy0}, {vy1})");
+        let bottom = rules.iter().filter(|(_, y0, _, y1)| y0 == y1).map(|(_, y, _, _)| *y).fold(f32::NEG_INFINITY, f32::max);
+        let row = hy + (bottom - hy) * 0.25; // inside the first row, clear of any rule across it
+        // The darkest pixel in a small box: the tone of a line, however it is antialiased.
+        let scale = 8.0;
+        let darkest = |img: &Rendered, cx: f32, cy: f32| {
+            let (px, py) = ((cx * scale) as i64, (cy * scale) as i64);
+            (px - 2..=px + 2)
+                .flat_map(|x| (py - 2..=py + 2).map(move |y| (x, y)))
+                .filter(|(x, y)| *x >= 0 && *y >= 0)
+                .map(|(x, y)| img.pixel(x as u32, y as u32)[0])
+                .min()
+                .expect("a pixel")
+        };
+        let dimmed = render_page(&d, page, scale, &RenderOptions::default());
+        let undimmed = RenderOptions { display: DisplayOptions { dim_header: false, ..Default::default() }, ..Default::default() };
+        let undimmed = render_page(&d, page, scale, &undimmed);
+        // One border, well clear of any crossing or shared edge: the tone the others must keep.
+        let line = darkest(&dimmed, vx + 30.0, hy);
+        assert!(line > 0, "the dimmed border is drawn, faded: {line}");
+        assert_eq!(darkest(&dimmed, vx, hy), line, "the crossing is darker than the line");
+        assert_eq!(darkest(&dimmed, hx0 + 150.0, row), line, "a shared border is darker than the outer ones");
+        assert_eq!(darkest(&undimmed, vx, hy), darkest(&undimmed, vx + 30.0, hy), "undimmed too");
+        assert!(darkest(&undimmed, vx + 30.0, hy) < line, "the header is faded");
     }
 
     #[test]

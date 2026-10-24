@@ -280,9 +280,13 @@ Mailings|Write & Insert Fields|Match Fields|mailings.matchFields
 Mailings|Preview Results|Preview Results|mailings.preview
 Mailings|Preview Results|Next Record|mailings.next
 Mailings|Preview Results|Previous Record|mailings.previous
+Mailings|Preview Results|First Record|mailings.first
+Mailings|Preview Results|Last Record|mailings.last
+Mailings|Preview Results|Go to Record|mailings.goToRecord
 Mailings|Preview Results|Find Recipient|mailings.findRecipient
 Mailings|Preview Results|Check for Errors|mailings.checkErrors
 Mailings|Finish|Finish & Merge|mailings.finish
+Mailings|Finish|Print Documents|mailings.printDocuments
 Review|Proofing|Spelling & Grammar|review.spelling
 Review|Proofing|Thesaurus|review.thesaurus
 Review|Proofing|Word Count|review.wordCount

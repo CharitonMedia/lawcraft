@@ -2075,6 +2075,46 @@ fn autocorrect_capitalisation_follows_turkic_case_mapping() {
     assert_eq!(s.doc.plain_text(StoryRef::Body), "İngilizce ", "no combining dot in any language");
 }
 
+/// #3479: Format > Change Case follows the same Turkic case mapping as AutoCorrect, using
+/// each run's own language; other languages keep the Unicode default.
+#[test]
+fn change_case_follows_turkic_case_mapping() {
+    for tag in ["tr-TR", "az-AZ"] {
+        for (mode, input, want) in [
+            ("upper", "istanbul", "İSTANBUL"),
+            ("lower", "IŞIK", "ışık"),
+            ("title", "istanbul güzel", "İstanbul Güzel"),
+            ("sentence", "istanbul. izmir", "İstanbul. İzmir"),
+            ("toggle", "iI", "İı"),
+        ] {
+            let mut s = s();
+            run(&mut s, "review.language", json!({"lang": tag, "default": true}));
+            run(&mut s, "text.insert", json!({"text": input, "raw": true}));
+            run(&mut s, "select.all", json!({}));
+            run(&mut s, "format.changeCase", json!({"mode": mode}));
+            assert_eq!(s.doc.plain_text(StoryRef::Body), want, "{tag} {mode}");
+        }
+    }
+    // Other languages keep the Unicode default.
+    let mut s = self::s();
+    run(&mut s, "text.insert", json!({"text": "istanbul", "raw": true}));
+    run(&mut s, "select.all", json!({}));
+    run(&mut s, "format.changeCase", json!({"mode": "title"}));
+    assert_eq!(s.doc.plain_text(StoryRef::Body), "Istanbul", "en-US");
+    // Mixed runs: each run's own language decides.
+    let mut s = self::s();
+    run(&mut s, "text.insert", json!({"text": "IŞIK IŞIK", "raw": true}));
+    run(&mut s, "caret.set", json!({"pos": Pos::body(0, 0)}));
+    run(&mut s, "caret.set", json!({"pos": Pos::body(0, 5), "extend": true}));
+    run(&mut s, "review.language", json!({"lang": "tr-TR"}));
+    run(&mut s, "caret.set", json!({"pos": Pos::body(0, 6)}));
+    run(&mut s, "caret.set", json!({"pos": Pos::body(0, 11), "extend": true}));
+    run(&mut s, "review.language", json!({"lang": "en-US"}));
+    run(&mut s, "select.all", json!({}));
+    run(&mut s, "format.changeCase", json!({"mode": "lower"}));
+    assert_eq!(s.doc.plain_text(StoryRef::Body), "ışık işik", "mixed runs");
+}
+
 // Spelling as you type (#1552): the word being typed gets no red squiggle until the caret leaves
 // it; F7 and the Spelling pane still report it. See docs/typing-parity.md. Paragraphs start with
 // a correct word so AutoCorrect's sentence capital doesn't change the misspelled one.

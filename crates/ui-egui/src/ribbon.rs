@@ -908,11 +908,27 @@ pub(crate) fn caret_language(app: &WordApp) -> String {
     tl!(&language_name(caret_lang_tag(app).as_deref())).to_string()
 }
 
-/// The language tag at the caret, resolved through the styles and the document default.
-fn caret_lang_tag(app: &WordApp) -> Option<String> {
+/// The formatting at the caret, resolved through the styles and the document default.
+fn caret_char(app: &WordApp) -> wordcraft_doc::resolve::ResolvedChar {
     let s = &app.session;
     let style = s.doc.para_at(&s.sel.focus).and_then(|p| p.props.style.clone());
-    s.doc.styles.resolve_char(style.as_deref(), &s.typing_props()).lang
+    s.doc.styles.resolve_char(style.as_deref(), &s.typing_props())
+}
+
+/// The language tag at the caret, resolved through the styles and the document default.
+fn caret_lang_tag(app: &WordApp) -> Option<String> {
+    caret_char(app).lang
+}
+
+/// Is the text at the caret itself marked Do not check spelling or grammar? (`format.state`
+/// looks at the whole word around a caret, so a partly marked word would read as checked.)
+pub(crate) fn caret_no_proof(app: &WordApp) -> bool {
+    caret_char(app).no_proof
+}
+
+/// Does WordCraft check spelling and grammar in the caret's language at all (Bulgarian: no)?
+pub(crate) fn caret_language_proofed(app: &WordApp) -> bool {
+    wordcraft_engine::proof::has_dictionary(caret_lang_tag(app).as_deref())
 }
 
 /// The Hunspell dictionary the caret's language needs but doesn't have (`pl_PL`), if any (#1167).
@@ -1647,6 +1663,12 @@ fn design(app: &mut WordApp, ui: &mut Ui) {
                     ("Relaxed", "relaxed"),
                     ("Double", "double"),
                 ] {
+                    // "Open" here is roomy spacing, not the file verb: only a `spacing` row
+                    // translates it, else it stays English.
+                    if l == "Open" {
+                        mi_text(ui, app, crate::i18n::get("spacing", l).unwrap_or(l), "design.paragraphSpacing", json!({"value": v}));
+                        continue;
+                    }
                     mi(ui, app, l, "design.paragraphSpacing", json!({"value": v}));
                 }
             });
@@ -2048,16 +2070,42 @@ fn mailings(app: &mut WordApp, ui: &mut Ui) {
         big(ui, app, "preview", "Preview\nResults", "mailings.preview", json!({}), false);
         stack(ui, |ui| {
             crate::widgets::row(ui, |ui| {
+                small(ui, app, "first", None, "First Record", "mailings.first", json!({}), false);
                 small(ui, app, "previous", None, "Previous Record", "mailings.previous", json!({}), false);
+                record_box(ui, app);
                 small(ui, app, "next", None, "Next Record", "mailings.next", json!({}), false);
+                small(ui, app, "last", None, "Last Record", "mailings.last", json!({}), false);
             });
             small(ui, app, "find", Some("Find Recipient"), "Find Recipient", "mailings.findRecipient", json!({}), false);
             small(ui, app, "checkErrors", Some("Check for Errors"), "Check for Errors", "mailings.checkErrors", json!({}), false);
         });
     });
     group(ui, "Finish", None, app, |ui, app| {
-        big(ui, app, "finish", "Finish &\nMerge", "mailings.finish", json!({}), false);
+        menu_button(ui, app, "finish", Some("Finish &\nMerge"), "Finish & Merge", true, "mailings.finish", |ui, app| {
+            mi(ui, app, "Edit Individual Documents…", "mailings.finish", json!({}));
+            mi(ui, app, "Print Documents…", "mailings.printDocuments", json!({}));
+        });
     });
+}
+
+/// Preview Results' record number: shows the previewed record; a number typed and Enter go there.
+fn record_box(ui: &mut Ui, app: &mut WordApp) {
+    let on = !app.session.merge.rows.is_empty();
+    let shown = if on { (app.session.merge.record + 1).to_string() } else { String::new() };
+    // The draft lives in temp memory while typing (frame-local text would lose keystrokes).
+    let key = egui::Id::new("merge_record_box");
+    let mut text = ui.data(|d| d.get_temp::<String>(key)).unwrap_or_else(|| shown.clone());
+    let r = ui.add_enabled(on, egui::TextEdit::singleline(&mut text).desired_width(36.0).horizontal_align(egui::Align::Center));
+    let r = r.on_hover_text(tl!("Go to Record"));
+    if r.changed() {
+        ui.data_mut(|d| d.insert_temp(key, text.clone()));
+    }
+    if r.lost_focus() {
+        ui.data_mut(|d| d.remove::<String>(key));
+        if ui.input(|i| i.key_pressed(egui::Key::Enter)) && text.trim() != shown {
+            let _ = app.run("mailings.goToRecord", json!({"record": text.trim()}));
+        }
+    }
 }
 
 /// Zotero (`docs/zotero.md`): the Zotero desktop app does the work in its own window.
@@ -3409,6 +3457,9 @@ mod tests {
     /// in Polish the table tabs were out of reach. They stay on the strip and a click opens them.
     #[test]
     fn table_tabs_stay_clickable_when_the_tab_strip_overflows() {
+        if !crate::i18n::catalogs_embedded() {
+            return;
+        }
         use egui_kittest::kittest::Queryable;
         let mut app = WordApp::new(Session::new(wordcraft_doc::Document::from_text("Text")), crate::Services::default());
         app.run("insert.table", json!({"rows": 3, "cols": 3})).unwrap();
@@ -3436,6 +3487,9 @@ mod tests {
     /// Editing / Share, the tabs stay inside the window, and the buttons keep their room.
     #[test]
     fn tab_strip_never_overlaps_the_right_buttons() {
+        if !crate::i18n::catalogs_embedded() {
+            return;
+        }
         use egui_kittest::kittest::Queryable;
         for lang in ["en", "pl", "de"] {
             for width in [300.0, 420.0, 520.0, 640.0, 765.0, 1280.0] {

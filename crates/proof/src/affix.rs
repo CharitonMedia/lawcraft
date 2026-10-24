@@ -261,6 +261,26 @@ struct Rules {
 /// A rule as parsed from text, before flags become bits: `(flag, cross, strip, add, cont, cond)`.
 type RawRule = (char, bool, String, String, String, String);
 
+/// Most distinct `TRY` characters kept; a hostile `.aff` could otherwise make every suggestion
+/// round cost time and memory proportional to the file size.
+const MAX_TRY_CHARS: usize = 128;
+
+/// Keeps the first [`MAX_TRY_CHARS`] distinct characters of a `TRY` value, in order.
+fn cap_try(s: &str) -> String {
+    let mut out = String::new();
+    let mut n = 0;
+    for c in s.chars() {
+        if n >= MAX_TRY_CHARS {
+            break;
+        }
+        if !out.contains(c) {
+            out.push(c);
+            n += 1;
+        }
+    }
+    out
+}
+
 /// `0` means empty in Hunspell's strip and append fields.
 fn zero_empty(s: &str) -> String {
     if s == "0" { String::new() } else { s.to_string() }
@@ -307,7 +327,7 @@ fn parse_aff(aff: &str) -> Result<Rules, String> {
                     _ => return Err(format!("line {}: {directive} needs one flag character", n + 1)),
                 }
             }
-            "TRY" => r.try_chars = at(1).to_string(),
+            "TRY" => r.try_chars = cap_try(at(1)),
             "KEY" => r.key = at(1).to_string(),
             "MAP" => {
                 if !map_header && at(1).parse::<usize>().is_ok() {
@@ -875,7 +895,7 @@ impl AffixDict {
             let f: Vec<&str> = line.split_whitespace().collect();
             let at = |k: usize| f.get(k).copied().unwrap_or("");
             match at(0) {
-                "TRY" => rules.try_chars = at(1).to_string(),
+                "TRY" => rules.try_chars = cap_try(at(1)),
                 "KEY" => rules.key = at(1).to_string(),
                 "MAP" => rules.map.push(at(1).chars().collect()),
                 "REP" => rules.rep.push((at(1).replace('_', " "), at(2).replace('_', " "))),
@@ -980,6 +1000,29 @@ pub(crate) mod tests {
         assert_eq!(hash.try_chars(), "a#b");
         assert_eq!(hash.key(), "a#b");
         assert_eq!(AffixDict::from_bytes(&hash.to_bytes()).unwrap().key(), "a#b");
+    }
+
+    #[test]
+    fn try_alphabet_is_capped_and_deduplicated() {
+        let aff = format!("TRY {}\n", "abcdefghijklmnopqrstuvwxyz".repeat(10_000));
+        let d = AffixDict::from_hunspell(&aff, "1\nkot\n", &[]).unwrap();
+        assert_eq!(d.try_chars(), "abcdefghijklmnopqrstuvwxyz");
+        let compact = AffixDict::from_bytes(&d.to_bytes()).unwrap();
+        assert_eq!(compact.try_chars(), "abcdefghijklmnopqrstuvwxyz");
+
+        // More distinct characters than the cap, each repeated: keep the first 128 in order.
+        let many: String = (0x100u32..0x100 + 300).filter_map(char::from_u32).collect();
+        let aff = format!("TRY {many}{many}\n");
+        let want: String = many.chars().take(128).collect();
+        let d = AffixDict::from_hunspell(&aff, "1\nkot\n", &[]).unwrap();
+        assert_eq!(d.try_chars(), want);
+        let compact = AffixDict::from_bytes(&d.to_bytes()).unwrap();
+        assert_eq!(compact.try_chars(), want);
+
+        // An oversized TRY line fed straight to the compact reader is capped as well.
+        let raw = format!("{MAGIC}\nTRY {many}{many}\nWORDS\n\0kot\n");
+        let bytes = miniz_oxide::deflate::compress_to_vec(raw.as_bytes(), 6);
+        assert_eq!(AffixDict::from_bytes(&bytes).unwrap().try_chars(), want);
     }
 
     /// Shared hand-written fixture: collectors must reject every path to NOSUGGEST forms.

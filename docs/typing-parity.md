@@ -187,8 +187,9 @@ Applied when a word is finished by a space, punctuation **or Enter** (`enter_fin
   `İngilizce`, `ılık` → `Ilık`; observed in Word for Mac with Turkish proofing). Lowercasing `İ`
   gives the single letter `i` in every language, never `i` + combining dot. Other languages keep
   the Unicode default (`istanbul` → `Istanbul` in English)
-  (`autocorrect_capitalisation_follows_turkic_case_mapping`). Format > Change Case is not yet
-  Turkish-aware.
+  (`autocorrect_capitalisation_follows_turkic_case_mapping`); Format > Change Case follows the
+  same Turkic mapping from each run's language, while other languages keep the Unicode default
+  (`change_case_follows_turkic_case_mapping`, #3479).
 - Names of days are capitalised (`monday` → `Monday`). AutoCorrect Options (#412,
   `tools.autocorrect`, saved per user) switch each of these off: replacements, sentence and
   table-cell capitals, days, smart quotes, fractions, ordinals, dashes, links, bulleted and

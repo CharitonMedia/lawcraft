@@ -14,16 +14,24 @@ pub const FORMAT_FLAT_OPC: &str = "flatopc";
 
 pub const MAX_AUTHOR_CHARS: usize = 255;
 
-/// Sets the user name that new tracked changes and comments are recorded under. The name is
-/// trimmed, stripped of control characters (they can't go into the saved XML) and cut to
-/// [`MAX_AUTHOR_CHARS`]; a blank name is refused so revisions always carry an author.
-pub(crate) fn set_author(s: &mut Session, v: &Value) -> CmdResult {
-    let name: String = p::req_str(v, "name")?.trim().chars().filter(|c| !c.is_control()).take(MAX_AUTHOR_CHARS).collect();
+/// The user name as it is stored: trimmed, stripped of control characters (they can't go into
+/// the saved XML) and cut to [`MAX_AUTHOR_CHARS`]; a blank name is refused so revisions always
+/// carry an author.
+pub fn normalize_author(name: &str) -> Result<String, CmdError> {
+    let name: String = name.trim().chars().filter(|c| !c.is_control()).take(MAX_AUTHOR_CHARS).collect();
     let name = name.trim_end();
     if name.is_empty() {
         return Err(CmdError::Params("`name` must not be blank".into()));
     }
-    s.author = name.to_string();
+    Ok(name.to_string())
+}
+
+/// Sets the user name that new tracked changes and comments are recorded under. The name is
+/// normalised by [`normalize_author`].
+/// A protected document refuses it: the name is the identity its exceptions are checked against.
+pub(crate) fn set_author(s: &mut Session, v: &Value) -> CmdResult {
+    super::protect::check_user_name(s)?;
+    s.author = normalize_author(p::req_str(v, "name")?)?;
     let mut r = sel_result(s)?;
     if let Some(o) = r.as_object_mut() {
         o.insert("name".into(), json!(s.author));
@@ -93,7 +101,7 @@ pub fn specs() -> Vec<CommandSpec> {
             // No path (the command search, say): the app asks where to save, as File › Export
             // does, instead of failing on the required parameter (#2313).
             let Some(path) = p::str(v, "path") else {
-                s.ui_requests.push(json!({"open": "exportPdf"}));
+                s.push_ui_request(json!({"open": "exportPdf"}));
                 return Ok(json!({"exported": false}));
             };
             let path = if path.to_ascii_lowercase().ends_with(".pdf") { path.to_string() } else { format!("{path}.pdf") };
@@ -120,13 +128,13 @@ pub fn specs() -> Vec<CommandSpec> {
             )
             .pure(),
         CommandSpec::new("file.print", "Print", "File", |s, _| {
-            s.ui_requests.push(json!({"open": "print"}));
+            s.push_ui_request(json!({"open": "print"}));
             sel_result(s)
         })
         .key("Mod+P / Mod+Shift+F12 / Mod+F2 / Mod+Alt+I")
         .pure(),
         CommandSpec::new("file.close", "Close", "File", |s, _| {
-            s.ui_requests.push(json!({"close": true}));
+            s.push_ui_request(json!({"close": true}));
             sel_result(s)
         })
         .key("Mod+W / Mod+F4")
@@ -220,7 +228,7 @@ fn normal_document(s: &Session) -> Document {
 /// Open a document, using the saved proofing default only for plain text and Markdown.
 fn open(s: &mut Session, v: &Value) -> CmdResult {
     let Some(path) = p::str(v, "path") else {
-        s.ui_requests.push(json!({"open": "openFile"}));
+        s.push_ui_request(json!({"open": "openFile"}));
         return sel_result(s);
     };
     let password = p::str(v, "password");
@@ -239,7 +247,7 @@ fn open(s: &mut Session, v: &Value) -> CmdResult {
     };
     let crate::io::OpenedDocument { mut doc, encrypted, pdf } = opened;
     // Plain text and Markdown carry no language: they are in the editing language.
-    let ext = std::path::Path::new(path).extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
+    let ext = std::path::Path::new(path).extension().and_then(std::ffi::OsStr::to_str).unwrap_or("").to_ascii_lowercase();
     if let Some(lang) = s.prefs.default_language.as_ref().or(s.editing_lang.as_ref())
         && matches!(ext.as_str(), "txt" | "text" | "md" | "markdown")
     {
@@ -295,7 +303,7 @@ fn save(s: &mut Session, v: &Value) -> CmdResult {
     let path = match p::str(v, "path").map(std::path::PathBuf::from).or_else(|| s.path.clone()) {
         Some(p) => p,
         None => {
-            s.ui_requests.push(json!({"open": "saveAs"}));
+            s.push_ui_request(json!({"open": "saveAs"}));
             return Ok(json!({"saved": false}));
         }
     };
@@ -366,23 +374,29 @@ fn is_word_2003_file(_path: &std::path::Path) -> bool {
 
 fn save_as(s: &mut Session, v: &Value) -> CmdResult {
     if p::str(v, "path").is_none() {
-        s.ui_requests.push(json!({"open": "saveAs"}));
+        s.push_ui_request(json!({"open": "saveAs"}));
         return Ok(json!({"saved": false}));
     }
     save(s, v)
 }
 
 /// How a copy is written: Print Markup from the command's `markup`, else the File › Print
-/// setting (`file.printMarkup`); comments as Track Changes Options show them.
+/// setting (`file.printMarkup`); comments as Track Changes Options show them; digits as the
+/// Numeral setting shows them on screen.
 pub fn export_options(s: &Session, v: &Value) -> crate::io::ExportOptions {
     let markup = p::bool(v, "markup").unwrap_or(s.prefs.print_markup);
-    crate::io::ExportOptions { markup, comments: markup && s.prefs.markup.comments, word2003: p::str(v, "format") == Some(FORMAT_WORD_2003) }
+    crate::io::ExportOptions {
+        markup,
+        comments: markup && s.prefs.markup.comments,
+        word2003: p::str(v, "format") == Some(FORMAT_WORD_2003),
+        numeral: s.view.numeral.resolve(crate::session::system_locale()),
+    }
 }
 
 fn export_png(s: &mut Session, v: &Value) -> CmdResult {
     // No path: the app asks where to save, as file.exportPdf does (#2313).
     let Some(path) = p::str(v, "path") else {
-        s.ui_requests.push(json!({"open": "exportPng"}));
+        s.push_ui_request(json!({"open": "exportPng"}));
         return Ok(json!({"exported": false}));
     };
     let page = p::u64(v, "page").unwrap_or(1).max(1) as usize - 1;
@@ -395,6 +409,9 @@ fn export_png(s: &mut Session, v: &Value) -> CmdResult {
     // the on-screen cue while editing the body, not part of the page.
     let mut opts = wordcraft_render::RenderOptions::default();
     opts.display.dim_header = false;
+    if !path.to_ascii_lowercase().ends_with(".png") {
+        return Err(CmdError::Params("path must end in .png".into()));
+    }
     let img = wordcraft_render::render_page(&s.doc, pg, scale, &opts);
     let png = img.to_png();
     crate::io::write_file(path, &png).map_err(CmdError::Failed)?;

@@ -199,7 +199,7 @@ pub fn specs() -> Vec<CommandSpec> {
             r#"{"props": ParaProps, "onPage"?: {"align"?: "left|center|right|justify|distribute", "left"?: pt, "right"?: pt} (alignment and indents as seen on the page: each paragraph's own direction, after `props`, says which edge is its start)}"#,
         ),
         CommandSpec::new("para.dialog", "Paragraph Settings", "Home › Paragraph", |s, _| {
-            s.ui_requests.push(json!({"open": "paragraph"}));
+            s.push_ui_request(json!({"open": "paragraph"}));
             sel_result(s)
         })
         .pure(),
@@ -213,7 +213,7 @@ pub fn specs() -> Vec<CommandSpec> {
                 return Err(CmdError::Params(format!("unknown sort `{sort}` (recommended|alphabetical)")));
             }
             let list = manage_list(s, sort == "alphabetical");
-            s.ui_requests.push(json!({"open": "manageStyles"}));
+            s.push_ui_request(json!({"open": "manageStyles"}));
             Ok(list)
         })
         .params(r#"{"sort"?: "recommended|alphabetical"} → [{id, name, type: "paragraph|character|linked|table", builtIn, inGallery, hidden, basedOn, priority, format}]"#)

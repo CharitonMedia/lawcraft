@@ -237,6 +237,8 @@ fn report_findings(r: &serde_json::Value) {
 }
 
 /// `--author NAME`: the author recorded on tracked changes and comments (`file.setAuthor`).
+/// The command also checks whether the open document is protected: this name determines which
+/// named editing exceptions the session can use, so the flag must not bypass that check.
 fn set_author(s: &mut Session, name: &str) -> Result<(), String> {
     s.run("file.setAuthor", &json!({"name": name})).map(|_| ()).map_err(|e| format!("--author: {e}"))
 }
@@ -925,6 +927,31 @@ mod tests {
         assert!(run(&args(&["run", "--author", "Claude", "--cmd", "review.trackChanges={\"value\":true}"])).is_ok());
         // The app's user name is the person's own; a bridge flag must not rewrite it.
         assert!(run(&args(&["mcp", "--connect", "127.0.0.1:9", "--author", "Claude"])).is_err_and(|e| e.to_string().contains("--author")));
+        // The flag goes through the same protection check as the command.
+        let mut s = Session::new(wordcraft_doc::Document::new());
+        s.run("review.restrict", &json!({"mode": "readOnly"})).unwrap();
+        let before = s.author.clone();
+        assert!(set_author(&mut s, "Claude").is_err());
+        assert_eq!(s.author, before);
+        assert!(s.run("file.setAuthor", &json!({"name": "Claude"})).is_err());
+    }
+
+    #[test]
+    fn author_flag_cannot_claim_a_named_exception_after_protection() {
+        use wordcraft_doc::{CharProps, InlineObject, StoryRef};
+
+        let mut s = Session::new(wordcraft_doc::Document::from_text("Named exception."));
+        let end = s.doc.end_of(StoryRef::Body);
+        s.doc.insert_object(&end, InlineObject::PermEnd { id: 1 }, &CharProps::default()).unwrap();
+        let start = s.doc.start_of(StoryRef::Body);
+        s.doc.insert_object(&start, InlineObject::PermStart { id: 1, group: String::new(), editor: "Alice".into() }, &CharProps::default()).unwrap();
+        assert_eq!(s.doc.perm_ranges().len(), 1);
+        s.run("review.restrict", &json!({"mode": "readOnly"})).unwrap();
+        s.run("select.text", &json!({"text": "Named"})).unwrap();
+        assert!(s.run("text.insert", &json!({"text": "Changed"})).is_err());
+
+        assert!(set_author(&mut s, "Alice").is_err(), "--author changed the identity used for a protected exception");
+        assert!(s.run("text.insert", &json!({"text": "Changed"})).is_err());
     }
 
     #[test]
@@ -1247,7 +1274,7 @@ mod tests {
     }
 
     /// APFS refuses file names that aren't valid UTF-8, so the fixture can't be made on macOS
-    /// (as in `tests/non_utf8_args.rs`).
+    /// (as in `tests/it/non_utf8_args.rs`).
     #[cfg(all(unix, not(target_os = "macos")))]
     #[test]
     fn script_file_name_need_not_be_unicode() {

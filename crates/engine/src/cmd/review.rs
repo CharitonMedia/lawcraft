@@ -1047,9 +1047,17 @@ fn tracking_options(s: &mut Session, v: &Value) -> CmdResult {
     m.move_to_color = color("moveToColor", "byAuthor", m.move_to_color)?;
     // Track moves is the document's (`w:doNotTrackMoves`), so changing it is an undo step; the
     // command is pure, so it records the step itself, once every parameter has been accepted.
+    // The other options are the user's own, so the command stays available under Restrict
+    // Editing; this one edits the document, so it passes the same check as an edit and isn't
+    // limited to an exception.
     if let Some(b) = p::bool(v, "trackMoves")
         && b != s.doc.settings.track_moves
     {
+        if super::protect::check_before(s, "review.trackingOptions", &json!({}))? {
+            return Err(CmdError::Disabled(
+                "review.trackingOptions: the document is protected; stop protection to change whether moves are tracked".into(),
+            ));
+        }
         s.checkpoint("Track Changes Options");
         s.doc.settings.track_moves = b;
         s.touch();
@@ -1686,6 +1694,21 @@ mod tests {
         let p = body_para(&s);
         assert_eq!((p.props.align, p.props.fmt_change.is_none()), (Some(wordcraft_doc::props::Align::Center), true));
         assert!(s.run("review.changes", &json!({})).unwrap().as_array().unwrap().is_empty());
+    }
+
+    /// Clearing formatting in the Style Inspector keeps pending formatting revisions.
+    #[test]
+    fn inspector_clear_keeps_formatting_changes() {
+        let mut s = formatted_while_tracking();
+        s.run("review.trackChanges", &json!({"value": false})).unwrap();
+        s.run("styles.inspectorClear", &json!({"level": "paragraphFormatting"})).unwrap();
+        assert!(body_para(&s).props.fmt_change.is_some(), "paragraph formatting change survives");
+
+        let mut s = formatted_while_tracking();
+        s.run("review.trackChanges", &json!({"value": false})).unwrap();
+        s.run("select.range", &json!({"anchor": {"block": 0, "off": 6}, "focus": {"block": 0, "off": 11}})).unwrap();
+        s.run("styles.inspectorClear", &json!({"level": "characterFormatting"})).unwrap();
+        assert!(body_para(&s).props_of_char(6).fmt_change.is_some(), "character formatting change survives");
     }
 
     /// Comment anchors left in any story (the body, headers, footers, notes and text boxes), with

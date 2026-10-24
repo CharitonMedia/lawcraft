@@ -7,6 +7,11 @@ on:
   schedule:
     - cron: "0 8 * * *" # 3 a.m. Central daylight time, 2 a.m. standard
   workflow_dispatch:
+    inputs:
+      alert-test:
+        description: "Fail on purpose, to check that the failure email reaches the maintainer"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -59,12 +64,22 @@ jobs:
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
 
+      - name: Alert test
+        if: inputs.alert-test
+        run: |
+          echo "error: alert test requested; failing on purpose" >&2
+          exit 1
+
       - name: Merge WordCraft main
         id: merge
         run: |
           git config user.name "LawCraft sync"
           git config user.email "245314230+pattalkslaw-del@users.noreply.github.com"
           .github/sync/sync.sh
+
+      - name: Check out craft-i18n
+        if: steps.merge.outputs.result == 'merged'
+        uses: storytold/craft-common-actions/actions/checkout-craft-i18n@9e42334399655e6838f234c912d29c0697cad477 # craft-common-actions main, 2026-10-24
 
       - name: Quality gate
         if: steps.merge.outputs.result == 'merged'
@@ -81,28 +96,35 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          for n in $(gh issue list --state open --search "in:title \"$ISSUE_TITLE\"" --json number --jq '.[].number'); do
-            gh issue close "$n" --comment "Tonight's sync passed: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          run="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          for n in $(gh api "repos/$GITHUB_REPOSITORY/issues?state=open&per_page=100" --jq '.[] | select(.title == env.ISSUE_TITLE) | .number'); do
+            gh api "repos/$GITHUB_REPOSITORY/issues/$n/comments" -f body="Tonight's sync passed: $run" --silent
+            gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/$n" -f state=closed --silent
           done
 
+      # An issue assigned to the maintainer, mentioning him, so GitHub emails him. REST, not
+      # `gh issue`: the GraphQL createIssue call is refused to this workflow's token.
       - name: Tell the maintainer
         if: failure()
         env:
           GH_TOKEN: ${{ github.token }}
           CONFLICTS: ${{ steps.merge.outputs.conflicts }}
+          ALERT_TEST: ${{ inputs.alert-test }}
         run: |
           run="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
-          if [ -n "$CONFLICTS" ]; then
+          if [ "$ALERT_TEST" = true ]; then
+            why="This is a test of the sync's failure alert. Nothing is wrong; close this issue."
+          elif [ -n "$CONFLICTS" ]; then
             why="Merging WordCraft's main conflicts with LawCraft in: \`$CONFLICTS\`. Nothing was pushed."
           else
-            why="The merge went through but the quality gate (\`cargo xtask ci\`) failed. Nothing was pushed."
+            why="The nightly sync failed before or during the quality gate (\`cargo xtask ci\`). Nothing was pushed."
           fi
           body="@$MAINTAINER $why
 
           Run: $run"
-          n="$(gh issue list --state open --search "in:title \"$ISSUE_TITLE\"" --json number --jq '.[0].number // empty')"
+          n="$(gh api "repos/$GITHUB_REPOSITORY/issues?state=open&per_page=100" --jq '[.[] | select(.title == env.ISSUE_TITLE) | .number][0] // empty')"
           if [ -n "$n" ]; then
-            gh issue comment "$n" --body "$body"
+            gh api "repos/$GITHUB_REPOSITORY/issues/$n/comments" -f body="$body" --silent
           else
-            gh issue create --title "$ISSUE_TITLE" --assignee "$MAINTAINER" --body "$body"
+            gh api "repos/$GITHUB_REPOSITORY/issues" -f title="$ISSUE_TITLE" -f body="$body" -f "assignees[]=$MAINTAINER" --silent
           fi

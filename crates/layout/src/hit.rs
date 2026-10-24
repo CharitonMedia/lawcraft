@@ -566,20 +566,27 @@ impl DocLayout {
         None
     }
 
-    /// Word's selection bar (#856): when (x, y) is in the page's left margin, left of the body
-    /// text column, the start of the body line at that height. Not in the header/footer area,
-    /// not beside a table's lines (those are left to the table), nothing on an empty page.
+    /// Word's selection bar (#856): when (x, y) is in the page margin beside the text column,
+    /// the start of the body line at that height. The bar is the left margin for a left-to-right
+    /// paragraph and the right margin for a right-to-left one. Not in the header/footer area,
+    /// not beside a table's lines (those are the table's row areas), nothing on an empty page.
     pub fn selection_bar_at(&self, page: usize, x: f32, y: f32) -> Option<Pos> {
         let p = self.pages.get(page)?;
-        if !(x.is_finite() && y.is_finite()) || x < 0.0 || x >= p.body.x || y < p.body.y || y > p.body.bottom() {
+        if !(x.is_finite() && y.is_finite()) || x < 0.0 || x > p.w || y < p.body.y || y > p.body.bottom() {
+            return None;
+        }
+        let left = x < p.body.x;
+        if !left && x <= p.body.right() {
             return None;
         }
         let l = nearest_line_at(p, y, false)?;
-        if l.path.0.len() > 1 || l.left < p.body.x - 0.5 {
-            // A table's line, or text hanging into the margin: not the selection bar.
+        let line = l.para.lines.get(l.li)?;
+        // The line's own side, and no text hanging into that margin.
+        let hangs = if line.rtl { l.right > p.body.right() + 0.5 } else { l.left < p.body.x - 0.5 };
+        if l.path.0.len() > 1 || line.rtl == left || hangs {
             return None;
         }
-        Some(Pos { story: StoryRef::Body, path: l.path.clone(), off: l.para.lines.get(l.li)?.start })
+        Some(Pos { story: StoryRef::Body, path: l.path.clone(), off: line.start })
     }
 
     /// The start of the top-level body line nearest height `y` on `page` (dragging in the

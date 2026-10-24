@@ -60,6 +60,8 @@ pub struct ExportOptions {
     /// An `.xml` copy is a Word 2003 XML Document (WordprocessingML 2003) instead of a Word XML
     /// Document (Flat OPC): `format: "wordml2003"` on the save commands.
     pub word2003: bool,
+    /// How digits look in PDFs and page images (the Numeral setting, `System` resolved).
+    pub numeral: wordcraft_layout::NumeralMode,
 }
 
 /// A document password: wiped from memory when dropped, never printed (`Debug` shows `***`).

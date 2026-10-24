@@ -116,14 +116,14 @@ static DICTIONARY_GENERATION: AtomicU64 = AtomicU64::new(0);
 
 /// Add a word to the user dictionary ("Add to Dictionary"). It applies to every language.
 pub fn add_word(w: &str) {
-    if user_words().write().unwrap_or_else(|e| e.into_inner()).insert(w.to_lowercase()) {
+    if user_words().write().unwrap_or_else(std::sync::PoisonError::into_inner).insert(w.to_lowercase()) {
         DICTIONARY_GENERATION.fetch_add(1, Ordering::Relaxed);
     }
 }
 
 /// Take a word out of the user dictionary (File › Options › Proofing). Returns whether it was there.
 pub fn remove_word(w: &str) -> bool {
-    let removed = user_words().write().unwrap_or_else(|e| e.into_inner()).remove(&w.to_lowercase());
+    let removed = user_words().write().unwrap_or_else(std::sync::PoisonError::into_inner).remove(&w.to_lowercase());
     if removed {
         DICTIONARY_GENERATION.fetch_add(1, Ordering::Relaxed);
     }
@@ -138,7 +138,7 @@ fn ignored_words() -> &'static RwLock<HashSet<String>> {
 /// Ignore a word everywhere until the app closes ("Ignore All"). Unlike [`add_word`] it isn't
 /// part of the user dictionary: it is never listed, saved or loaded, as in Word.
 pub fn ignore_word(w: &str) {
-    if ignored_words().write().unwrap_or_else(|e| e.into_inner()).insert(w.to_lowercase()) {
+    if ignored_words().write().unwrap_or_else(std::sync::PoisonError::into_inner).insert(w.to_lowercase()) {
         DICTIONARY_GENERATION.fetch_add(1, Ordering::Relaxed);
     }
 }
@@ -198,13 +198,13 @@ pub fn dictionary_generation() -> u64 {
 
 /// Is `lower` (a lower-case word) in the user dictionary or ignored?
 pub(crate) fn in_user_dictionary(lower: &str) -> bool {
-    user_words().read().unwrap_or_else(|e| e.into_inner()).contains(lower)
-        || ignored_words().read().unwrap_or_else(|e| e.into_inner()).contains(lower)
+    user_words().read().unwrap_or_else(std::sync::PoisonError::into_inner).contains(lower)
+        || ignored_words().read().unwrap_or_else(std::sync::PoisonError::into_inner).contains(lower)
 }
 
 /// Words in the user dictionary.
 pub fn user_dictionary() -> Vec<String> {
-    let mut v: Vec<String> = user_words().read().unwrap_or_else(|e| e.into_inner()).iter().cloned().collect();
+    let mut v: Vec<String> = user_words().read().unwrap_or_else(std::sync::PoisonError::into_inner).iter().cloned().collect();
     v.sort();
     v
 }
@@ -312,7 +312,7 @@ fn read_dictionary_file(path: &std::path::Path) -> Vec<String> {
 /// never a panic and never an error that stops startup. Returns the words added.
 pub fn load_user_dictionary(path: &std::path::Path) -> Vec<String> {
     let words = read_dictionary_file(path);
-    let mut set = user_words().write().unwrap_or_else(|e| e.into_inner());
+    let mut set = user_words().write().unwrap_or_else(std::sync::PoisonError::into_inner);
     let mut added = Vec::new();
     for w in words {
         if set.len() >= MAX_CUSTOM_WORDS {
@@ -338,7 +338,7 @@ pub fn save_user_dictionary(path: &std::path::Path, removed: &[String]) -> std::
     let removed: HashSet<String> = removed.iter().map(|w| w.to_lowercase()).collect();
     let on_disk = read_dictionary_file(path);
     {
-        let mut set = user_words().write().unwrap_or_else(|e| e.into_inner());
+        let mut set = user_words().write().unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut changed = false;
         for w in on_disk {
             if set.len() >= MAX_CUSTOM_WORDS {
@@ -380,7 +380,7 @@ const COMMON: &str = "a an the and or but if of to in on at by for with from as 
 const EXTRA_EN: &str = include_str!("../../../assets/spelling/en-extra.txt");
 
 fn extra_words() -> &'static HashSet<&'static str> {
-    static E: OnceLock<HashSet<&'static str>> = OnceLock::new();
+    static E: OnceLock<HashSet<&str>> = OnceLock::new();
     E.get_or_init(|| EXTRA_EN.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('#')).collect())
 }
 
@@ -395,9 +395,9 @@ fn known_core(w: &str, module: ModuleEn) -> bool {
     if base_known(d, w) || COMMON.split(' ').any(|c| c == w) {
         return true;
     }
-    if user_words().read().unwrap_or_else(|e| e.into_inner()).contains(w)
+    if user_words().read().unwrap_or_else(std::sync::PoisonError::into_inner).contains(w)
         || in_module_spelling(w, module)
-        || ignored_words().read().unwrap_or_else(|e| e.into_inner()).contains(w)
+        || ignored_words().read().unwrap_or_else(std::sync::PoisonError::into_inner).contains(w)
     {
         return true;
     }
@@ -460,16 +460,13 @@ pub fn has_dictionary(lang: Option<&str>) -> bool {
     ProofLang::from_tag(lang).is_proofed()
 }
 
-/// The Hunspell dictionary name (`pl_PL`, `pt_BR`) a proofing language needs but doesn't have
+/// The Hunspell dictionary name (`pl_PL`, `it_IT`) a proofing language needs but doesn't have
 /// installed, for a status-bar hint (#1167). `None` when the language's dictionary is available,
 /// or when it needs none (English has a built-in word list; unproofed languages aren't offered
 /// one). Reads the dictionary once (it is cached afterwards).
 pub fn missing_dictionary(lang: Option<&str>) -> Option<&'static str> {
-    match ProofLang::from_tag(lang) {
-        ProofLang::Pl => dictionary_needed(ProofLang::Pl, pl::has_dictionary()),
-        ProofLang::Pt => dictionary_needed(ProofLang::Pt, pt::has_dictionary()),
-        _ => None,
-    }
+    let lang = ProofLang::from_tag(lang);
+    dictionary_needed(lang, dictionary_loaded(lang)?)
 }
 
 /// The Hunspell name, `.dic` file and reason of a dictionary that is installed for this language
@@ -477,24 +474,38 @@ pub fn missing_dictionary(lang: Option<&str>) -> Option<&'static str> {
 /// loaded, or when no file exists (then [`missing_dictionary`] names it). Reads the dictionary
 /// once (it is cached afterwards).
 pub fn unreadable_dictionary(lang: Option<&str>) -> Option<(&'static str, std::path::PathBuf, String)> {
-    let (proof_lang, loaded) = match ProofLang::from_tag(lang) {
-        ProofLang::Pl => (ProofLang::Pl, pl::has_dictionary()),
-        ProofLang::Pt => (ProofLang::Pt, pt::has_dictionary()),
-        _ => return None,
-    };
-    let name = dictionary_needed(proof_lang, false)?;
-    if loaded {
-        return None;
-    }
+    let lang = ProofLang::from_tag(lang);
+    let name = dictionary_needed(lang, dictionary_loaded(lang)?)?;
     hunspell::load_error(name).map(|(file, reason)| (name, file, reason))
 }
 
-/// The Hunspell name `lang` needs when `installed` is false; only Polish and Portuguese use one.
+/// Did the Hunspell dictionary of `lang` load? `None` for languages that use none (English).
+fn dictionary_loaded(lang: ProofLang) -> Option<bool> {
+    Some(match lang {
+        ProofLang::Pl => pl::has_dictionary(),
+        ProofLang::Pt => pt::has_dictionary(),
+        ProofLang::It => it::has_dictionary(),
+        ProofLang::Hr => hr::has_dictionary(),
+        ProofLang::Tr => tr::has_dictionary(),
+        ProofLang::Ru => ru::has_dictionary(),
+        ProofLang::Cs => cs::has_dictionary(),
+        ProofLang::Id => id::has_dictionary(),
+        _ => return None,
+    })
+}
+
+/// The Hunspell name `lang` needs when `installed` is false (the first name its module looks for).
 fn dictionary_needed(lang: ProofLang, installed: bool) -> Option<&'static str> {
     match lang {
         _ if installed => None,
         ProofLang::Pl => Some("pl_PL"),
         ProofLang::Pt => Some("pt_BR"),
+        ProofLang::It => Some("it_IT"),
+        ProofLang::Hr => Some("hr_HR"),
+        ProofLang::Tr => Some("tr_TR"),
+        ProofLang::Ru => Some("ru_RU"),
+        ProofLang::Cs => Some("cs_CZ"),
+        ProofLang::Id => Some("id_ID"),
         _ => None,
     }
 }
@@ -799,14 +810,14 @@ pub fn is_correct_in_with(word: &str, lang: ProofLang, opts: &Options) -> bool {
 pub fn is_correct_in_with_module(word: &str, lang: ProofLang, opts: &Options, module: ModuleEn) -> bool {
     match lang {
         ProofLang::En | ProofLang::EnGb | ProofLang::EnCa => is_correct_english(word, lang, opts, module),
-        ProofLang::Pl => accepted_by_options(word, opts) || pl::is_correct(word),
-        ProofLang::Hr => accepted_by_options(word, opts) || hr::is_correct(word),
-        ProofLang::Pt => accepted_by_options(word, opts) || pt::is_correct(word),
-        ProofLang::It => accepted_by_options(word, opts) || it::is_correct(word),
+        ProofLang::Pl => accepted_by_options(word, opts) || pl::is_correct_with_options(word, opts),
+        ProofLang::Hr => accepted_by_options(word, opts) || hr::is_correct_with_options(word, opts),
+        ProofLang::Pt => accepted_by_options(word, opts) || pt::is_correct_with_options(word, opts),
+        ProofLang::It => accepted_by_options(word, opts) || it::is_correct_with_options(word, opts),
         ProofLang::Tr => accepted_by_options(word, opts) || tr::is_correct(word),
         ProofLang::Ru => accepted_by_options(word, opts) || ru::is_correct(word),
-        ProofLang::Cs => accepted_by_options(word, opts) || cs::is_correct(word),
-        ProofLang::Id => accepted_by_options(word, opts) || id::is_correct(word),
+        ProofLang::Cs => accepted_by_options(word, opts) || cs::is_correct_with_options(word, opts),
+        ProofLang::Id => accepted_by_options(word, opts) || id::is_correct_with_options(word, opts),
         ProofLang::Bg | ProofLang::De | ProofLang::Other => true,
     }
 }
@@ -980,7 +991,7 @@ fn grammar_en(text: &str, capital_first: bool) -> Vec<Issue> {
         if gap == " "
             && (w0 == "an" || w0 == "An")
             && w1.chars().next().is_some_and(|c| c.is_alphabetic() && !"aeiouAEIOUhH".contains(c))
-            && !w1.chars().all(|c| c.is_uppercase())
+            && !w1.chars().all(char::is_uppercase)
         {
             v.push(Issue {
                 start: *a0,
@@ -1059,6 +1070,23 @@ mod tests {
         assert_eq!(dictionary_needed(ProofLang::Pt, false), Some("pt_BR"));
         assert_eq!(dictionary_needed(ProofLang::Pl, true), None);
         assert_eq!(dictionary_needed(ProofLang::Pt, true), None);
+        // Every Hunspell language is named by the first name its module looks for (#3150).
+        for (l, name) in [
+            (ProofLang::It, "it_IT"),
+            (ProofLang::Hr, "hr_HR"),
+            (ProofLang::Tr, "tr_TR"),
+            (ProofLang::Ru, "ru_RU"),
+            (ProofLang::Cs, "cs_CZ"),
+            (ProofLang::Id, "id_ID"),
+        ] {
+            assert_eq!(dictionary_needed(l, false), Some(name), "{l:?}");
+            assert_eq!(dictionary_needed(l, true), None, "{l:?}");
+        }
+        // Every proofed language other than English has a Hunspell dictionary to report.
+        for l in ProofLang::PROOFED {
+            let english = matches!(l, ProofLang::En | ProofLang::EnGb | ProofLang::EnCa);
+            assert_eq!(dictionary_needed(l, false).is_some(), !english, "{l:?}");
+        }
         for l in [ProofLang::En, ProofLang::Bg, ProofLang::De, ProofLang::Other] {
             assert_eq!(dictionary_needed(l, false), None);
         }
