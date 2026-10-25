@@ -331,7 +331,9 @@ pub fn split(
     icons::paint(ui.painter(), ic, icon, c, a);
     if let Some(sw) = swatch {
         let sw = if on { sw } else { t.text_disabled };
-        ui.painter().rect_filled(Rect::from_min_max(pos2(r.min.x + 4.0, r.max.y - 5.0), pos2(r.max.x - 4.0, r.max.y - 2.0)), 0.0, sw);
+        let bar = Rect::from_min_max(pos2(r.min.x + 4.0, r.max.y - 5.0), pos2(r.max.x - 4.0, r.max.y - 2.0));
+        ui.painter().rect_filled(bar, 0.0, sw);
+        ui.painter().rect_stroke(bar, 0.0, Stroke::new(0.5, t.border), egui::StrokeKind::Inside);
     }
     icons::paint(ui.painter(), Rect::from_center_size(ar.center(), vec2(DROPDOWN, DROPDOWN)), "dropdown", c, a);
     let resp = tooltip(app, resp, tip, id);
@@ -1308,6 +1310,48 @@ pub fn icon_menu_item(ui: &mut Ui, icon: &str, text: &str, shortcut: &str, min_w
         ui.painter().galley(pos2(r.max.x - pad.x - g.size().x, r.center().y - g.size().y / 2.0), g, t.text_disabled);
     }
     resp
+}
+
+/// A strip of dialog tabs. The active tab joins the page below it.
+/// Returns the index of the tab the user clicked.
+pub fn dialog_tabs(ui: &mut Ui, labels: &[String], selected: usize) -> Option<usize> {
+    const H: f32 = 26.0;
+    let t = Tokens::get(ui.ctx());
+    let page = ui.visuals().window_fill;
+    let need: f32 = labels.iter().map(|l| ui.painter().layout_no_wrap(l.clone(), regular(12.5), t.text).size().x + 27.0).sum::<f32>() + 1.0;
+    ui.set_min_width(need);
+    let origin = ui.cursor().min;
+    let width = ui.available_width();
+    let base_y = origin.y + H;
+    let base = ui.painter().add(egui::Shape::Noop);
+    let top = CornerRadius { nw: 5, ne: 5, sw: 0, se: 0 };
+    let mut x = origin.x;
+    let mut clicked = None;
+    for (i, label) in labels.iter().enumerate() {
+        let on = i == selected;
+        let galley = ui.painter().layout_no_wrap(label.clone(), regular(12.5), t.text);
+        let w = galley.size().x + 28.0;
+        let r = Rect::from_min_max(pos2(x, origin.y + 2.0), pos2(x + w, base_y));
+        let resp = ui.interact(r, ui.id().with(("dialog_tab", i)), Sense::click());
+        resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, true, on, label));
+        let hover = ui.ctx().animate_bool_responsive(resp.id.with("hover"), resp.hovered());
+        let fill = if on { page } else { page.lerp_to_gamma(t.border, 0.14 + 0.1 * hover) };
+        let p = ui.painter();
+        let shown = if on { r } else { Rect::from_min_max(pos2(r.min.x, r.min.y + 2.0), r.max) };
+        p.rect(shown, top, fill, Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
+        if on {
+            p.rect_filled(Rect::from_min_max(pos2(r.min.x + 1.0, base_y - 1.0), pos2(r.max.x - 1.0, base_y + 1.0)), 0.0, page);
+        }
+        let color = if on { t.text } else { t.text.gamma_multiply(0.8) };
+        p.galley(pos2(r.center().x - galley.size().x / 2.0, r.center().y - galley.size().y / 2.0), galley, color);
+        if resp.clicked() && !on {
+            clicked = Some(i);
+        }
+        x += w - 1.0;
+    }
+    ui.allocate_space(vec2(width, H + 1.0));
+    ui.painter().set(base, egui::Shape::line_segment([pos2(origin.x, base_y), pos2(origin.x + width, base_y)], Stroke::new(1.0, t.border)));
+    clicked
 }
 
 #[cfg(test)]

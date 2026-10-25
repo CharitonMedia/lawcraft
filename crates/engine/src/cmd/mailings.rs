@@ -524,7 +524,16 @@ fn insert_field(s: &mut Session, instr: &str, placeholder: &str) -> CmdResult {
 /// Parse CSV (RFC 4180-ish: quotes, doubled quotes, commas/semicolons/tabs).
 pub fn parse_csv(text: &str) -> Vec<Vec<String>> {
     let first = text.lines().next().unwrap_or("");
-    let sep = [',', ';', '\t'].into_iter().max_by_key(|c| first.matches(*c).count()).unwrap_or(',');
+    let mut quoted = false;
+    let mut unquoted = String::new();
+    for c in first.chars() {
+        if c == '"' {
+            quoted = !quoted;
+        } else if !quoted {
+            unquoted.push(c);
+        }
+    }
+    let sep = [',', ';', '\t'].into_iter().max_by_key(|c| unquoted.matches(*c).count()).unwrap_or(',');
     let mut rows = Vec::new();
     let mut row = Vec::new();
     let mut cell = String::new();
@@ -1180,13 +1189,24 @@ fn envelope_size(v: &Value) -> Result<(f32, f32), CmdError> {
         .ok_or_else(|| CmdError::Params(format!("unknown envelope size `{name}`")))
 }
 
+/// Longest label or envelope address text accepted.
+const MAX_LABEL_TEXT: usize = 2_000;
+
+/// An optional label/envelope text parameter, rejected when longer than `MAX_LABEL_TEXT` characters.
+fn label_text(v: &Value, key: &str) -> Result<Option<String>, CmdError> {
+    match p::str(v, key) {
+        Some(t) if t.chars().count() > MAX_LABEL_TEXT => Err(CmdError::Params(format!("`{key}` is longer than {MAX_LABEL_TEXT} characters"))),
+        t => Ok(t.map(str::to_string)),
+    }
+}
+
 /// Envelopes: a landscape page with the return address at the top left and the delivery address
 /// in the middle. As a new document, or (`add`) as a section of its own at the start of this one.
 fn envelopes(s: &mut Session, v: &Value) -> CmdResult {
-    let delivery = p::str(v, "delivery").map(str::to_string).unwrap_or_else(|| {
+    let delivery = label_text(v, "delivery")?.unwrap_or_else(|| {
         if s.merge.rows.is_empty() { "Recipient Name\nStreet Address\nCity, ST 00000".into() } else { address_block(s, s.merge.record) }
     });
-    let ret = p::str(v, "return").unwrap_or("").to_string();
+    let ret = label_text(v, "return")?.unwrap_or_default();
     let (w, h) = envelope_size(v)?;
     let sect = SectionProps {
         page_w: w,
@@ -1408,7 +1428,7 @@ fn labels(s: &mut Session, v: &Value) -> CmdResult {
         (at("row").min(rows), at("col").min(cols))
     });
     let from_rec = single.is_none() && p::bool(v, "fromRecipients").unwrap_or(!s.merge.rows.is_empty() && p::str(v, "text").is_none());
-    let text = p::str(v, "text").unwrap_or("Name\nAddress\nCity, ST 00000").to_string();
+    let text = label_text(v, "text")?.unwrap_or_else(|| "Name\nAddress\nCity, ST 00000".into());
     let (page_w, page_h) = if prod.paper == "A4" { (595.3, 841.9) } else { (612.0, 792.0) };
     let h_gap = (prod.h_pitch - prod.width).max(0.0);
     let v_gap = (prod.v_pitch - prod.height).max(0.0);
@@ -1479,6 +1499,51 @@ mod tests {
         let r = parse_csv("Name,City\n\"Smith, Ann\",Paris\r\nBo,\"Oslo \"\"N\"\"\"\n\n");
         assert_eq!(r, vec![vec!["Name", "City"], vec!["Smith, Ann", "Paris"], vec!["Bo", "Oslo \"N\""]]);
         assert_eq!(parse_csv("a;b\n1;2")[1], vec!["1", "2"]);
+    }
+
+    /// #4001: finishing a merge opens a new document, with a new undo history. It is not an
+    /// edit of the open document, even when the merged document holds the same content.
+    #[test]
+    fn finishing_a_merge_opens_a_new_document_with_a_new_history() {
+        let mut s = Session::new(Document::from_text("Hello"));
+        s.run("text.insert", &json!({"text": "!"})).unwrap();
+        assert_eq!(s.undo_depth(), 1);
+        s.run("caret.docStart", &json!({})).unwrap();
+        // One recipient and no merge fields: the merged document holds the same content.
+        s.run("mailings.recipients", &json!({"rows": [{"Name": "Ada"}]})).unwrap();
+        let id = s.document_id();
+        s.run("mailings.finish", &json!({})).unwrap();
+        assert_ne!(s.document_id(), id, "the document was replaced");
+        assert_eq!(s.doc.plain_text(StoryRef::Body), "!Hello");
+        assert_eq!(s.undo_depth(), 0, "the new document starts with an empty undo history");
+        // Undo cannot bring the old document's text back.
+        s.run("edit.undo", &json!({})).unwrap();
+        assert_eq!(s.doc.plain_text(StoryRef::Body), "!Hello", "the old text does not come back");
+    }
+
+    /// #4004: finishing a merge to a file saves the merged copy there and leaves the open
+    /// document alone: it changes nothing, so it is not an edit.
+    #[test]
+    fn finishing_a_merge_to_a_file_is_not_an_edit() {
+        let dir = std::env::temp_dir().join(format!("wordcraft-merge-to-file-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let out = dir.join("merged.docx");
+        let mut s = Session::new(Document::from_text("Hello"));
+        s.run("text.insert", &json!({"text": "!"})).unwrap();
+        s.run("mailings.recipients", &json!({"rows": [{"Name": "Ada"}]})).unwrap();
+        let (depth, dirty, text) = (s.undo_depth(), s.dirty, s.doc.plain_text(StoryRef::Body));
+        s.run("mailings.finish", &json!({"path": out.to_string_lossy()})).unwrap();
+        assert!(out.exists(), "the merged copy was written");
+        assert_eq!(s.doc.plain_text(StoryRef::Body), text, "the open document is unchanged");
+        assert_eq!(s.undo_depth(), depth, "no undo step");
+        assert_eq!(s.dirty, dirty, "the unsaved-changes flag is unchanged");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn csv_delimiter_ignores_quoted_text() {
+        let r = parse_csv("\"Name, first, last\";City\nAnn;Paris\n");
+        assert_eq!(r, vec![vec!["Name, first, last", "City"], vec!["Ann", "Paris"]]);
     }
 
     #[test]
@@ -1721,6 +1786,17 @@ mod tests {
         let texts: Vec<String> = secs.iter().map(|(_, sp)| header(&s, sp.headers.default.unwrap())).collect();
         assert_eq!(texts, ["Recipient: Alpha", "Recipient: Beta"]);
         assert!(!s.doc.parts.contains_key(&hdr), "the template header is replaced by the letters' copies");
+    }
+
+    #[test]
+    fn label_and_envelope_text_is_capped() {
+        let mut s = Session::new(Document::new());
+        let long = "x".repeat(2001);
+        assert!(matches!(s.run("mailings.labels", &json!({"text": long})), Err(CmdError::Params(_))));
+        assert!(matches!(s.run("mailings.envelopes", &json!({"delivery": long})), Err(CmdError::Params(_))));
+        assert!(matches!(s.run("mailings.envelopes", &json!({"return": long})), Err(CmdError::Params(_))));
+        s.run("mailings.labels", &json!({"text": "x".repeat(2000), "rows": 40, "cols": 10})).unwrap();
+        assert!(s.doc.plain_text(StoryRef::Body).chars().count() <= 400 * 2000 + 400 * 20);
     }
 
     #[test]

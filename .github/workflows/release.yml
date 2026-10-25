@@ -25,7 +25,7 @@ jobs:
     with:
       app-name: wordcraft
       app-title: LawCraft
-      craft-fonts-ref: 8dcdacd5153e64560d109541a47d806f26f048c0
+      web-craft-fonts: true
       version: ${{ inputs.version }}
       has-web: false
       has-riscv64: false

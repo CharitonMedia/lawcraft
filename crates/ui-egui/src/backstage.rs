@@ -684,6 +684,15 @@ fn info_page(app: &mut WordApp, ui: &mut Ui) {
         if focused != app.info_editing.map(|(f, _)| f) {
             app.info_editing = None;
         }
+        // Advanced Properties › Custom (#2982): view and edit the document's custom properties.
+        ui.add_space(6.0);
+        if ui
+            .button(egui::RichText::new(tl!("Advanced Properties…")).font(medium(13.5)))
+            .on_hover_text(tl!("View and edit the document's custom properties."))
+            .clicked()
+        {
+            let _ = app.run("ui.dialog", json!({"name": "customProperties"}));
+        }
         // Protect Document › Encrypt with Password (#55).
         ui.add_space(18.0);
         ui.label(egui::RichText::new(tl!("Protect Document")).font(semibold(15.0)));

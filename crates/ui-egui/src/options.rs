@@ -311,7 +311,11 @@ fn display(app: &mut WordApp, ui: &mut Ui) {
 }
 
 fn proofing(app: &mut WordApp, ui: &mut Ui) {
-    // #476 (AutoCorrect Options…) goes here, at the top.
+    section(ui, "AutoCorrect");
+    if ui.button(tl!("AutoCorrect Options")).clicked() {
+        let _ = app.run("tools.autocorrect", json!({}));
+    }
+    ui.add_space(8.0);
     section(ui, "Spelling");
     let pr = app.session.prefs.clone();
     flag(app, ui, "Ignore words in capitals", "ignoreUppercase", pr.ignore_uppercase);
@@ -401,6 +405,10 @@ fn language_name(lang: wordcraft_engine::proof::ProofLang) -> &'static str {
         ProofLang::Ru => tl!("Russian"),
         ProofLang::Cs => tl!("Czech"),
         ProofLang::Id => tl!("Indonesian"),
+        ProofLang::Es => tl!("Spanish (Spain)"),
+        ProofLang::EsMx => tl!("Spanish (Mexico)"),
+        ProofLang::Es419 => tl!("Spanish (Latin America)"),
+        ProofLang::EsUy => tl!("Spanish (Uruguay)"),
         // English uses its bundled word list; Bulgarian and German have no dictionary yet.
         ProofLang::En | ProofLang::EnGb | ProofLang::EnCa | ProofLang::Bg | ProofLang::De | ProofLang::Other => "",
     }
@@ -1104,6 +1112,13 @@ mod tests {
         h.get_by_label("Ignore words in capitals").click();
         h.run_steps(2);
         assert!(!h.state().session.prefs.ignore_uppercase);
+        // The AutoCorrect Options dialog opens from this pane.
+        assert!(h.state().dialog.is_none());
+        h.get_by_label("AutoCorrect Options").click();
+        h.run_steps(3);
+        assert_eq!(h.state().dialog.as_ref().map(|d| d.name()), Some("autoCorrect"));
+        h.state_mut().dialog = None;
+        h.run_steps(2);
         // #1063: the dictionaries folder and the dictionary each language found.
         assert!(h.query_by_label("Dictionaries folder:").is_some());
         assert!(h.query_by_label_contains("Polish: ").is_some(), "the Polish dictionary's line");

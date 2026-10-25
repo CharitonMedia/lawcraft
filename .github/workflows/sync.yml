@@ -22,7 +22,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  CRAFT_FONTS_REF: 8dcdacd5153e64560d109541a47d806f26f048c0
+  CRAFT_FONTS_REF: bfcbf714e45a3ea8e98f88ab2b7971372a576414
   MAINTAINER: pattalkslaw-del
   ISSUE_TITLE: "Nightly WordCraft sync needs attention"
 

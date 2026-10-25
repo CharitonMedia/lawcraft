@@ -178,6 +178,9 @@ pub struct ViewState {
     pub read_zoom: f32,
     #[serde(skip)]
     pub read_line_spacing: Option<f32>,
+    /// Read Mode's Page Color: the paper the reading columns are drawn on.
+    #[serde(skip)]
+    pub read_page_color: crate::cmd::view::ReadPageColor,
     pub dark_mode: bool,
     pub show_markup: bool,
     pub track_changes_pane: bool,
@@ -265,6 +268,7 @@ impl Default for ViewState {
             read_column_width: None,
             read_zoom: default_read_zoom(),
             read_line_spacing: None,
+            read_page_color: Default::default(),
             dark_mode: false,
             show_markup: true,
             track_changes_pane: false,
@@ -323,8 +327,8 @@ struct Undo {
 
 /// What [`Session::restore`] needs to take commands back exactly: the document, the selection,
 /// the undo and redo stacks (also the oldest undo steps the undo limit pushes out meanwhile), the
-/// open typing group, a pending [`Session::join_next_undo`] and the dirty flag. See
-/// [`Session::edit_snapshot`].
+/// open typing group, a pending [`Session::join_next_undo`] (and whether its group has a step)
+/// and the dirty flag. See [`Session::edit_snapshot`].
 pub struct EditSnapshot {
     doc: Document,
     sel: Selection,
@@ -337,6 +341,7 @@ pub struct EditSnapshot {
     redo: Vec<Arc<Undo>>,
     typing_open: bool,
     join_next: bool,
+    join_anchor: bool,
     dirty: bool,
 }
 
@@ -366,6 +371,8 @@ pub struct Session {
     pub view: ViewState,
     /// Formatting picked with a collapsed caret, applied to the next typed text.
     pub pending: Option<CharProps>,
+    /// Last highlighter choice for the shortcut; palette state, outside document undo.
+    pub(crate) last_highlight: wordcraft_doc::props::Highlight,
     pub path: Option<std::path::PathBuf>,
     /// Name given to a document not saved yet (File › Info › Rename): what Save suggests. A file
     /// name, not document metadata, so it is not part of the document or its undo history.
@@ -416,6 +423,10 @@ pub struct Session {
     typing_open: bool,
     /// The next mutating command joins the previous undo step (later frames of a drag).
     join_next: bool,
+    /// Whether the undo group has a step of its own for the next joined command to merge
+    /// into. A command that changed nothing leaves the group without one, so the next
+    /// command in the group starts the step the group needs.
+    join_anchor: bool,
     /// The newest automatic capitalisation, for Word's "Automatically add words to list" (#1857).
     pub(crate) autocap: Option<crate::cmd::tools::AutoCap>,
     rev: u64,
@@ -735,7 +746,14 @@ impl Session {
         added
     }
 
+    /// Start an editing session at the document beginning with empty history and
+    /// default view, preferences and a yellow highlighter independent of document undo.
     pub fn new(doc: Document) -> Self {
+        Self::with_registry(doc, Arc::new(crate::cmd::registry()))
+    }
+
+    /// Initialise session defaults while sharing the immutable command registry with previews.
+    fn with_registry(doc: Document, registry: Arc<Registry>) -> Self {
         let start = doc.start_of(StoryRef::Body);
         let bib_style = doc_bib_style(&doc);
         Session {
@@ -743,6 +761,7 @@ impl Session {
             sel: Selection::caret(start),
             view: ViewState::default(),
             pending: None,
+            last_highlight: wordcraft_doc::props::Highlight::Yellow,
             path: None,
             file_name: None,
             user_dict_path: None,
@@ -755,7 +774,7 @@ impl Session {
             find: FindState::default(),
             goal_x: None,
             page_hint: 0,
-            registry: Arc::new(crate::cmd::registry()),
+            registry,
             author: "WordCraft User".into(),
             initials: String::new(),
             painter: None,
@@ -767,6 +786,7 @@ impl Session {
             redo: Vec::new(),
             typing_open: false,
             join_next: false,
+            join_anchor: false,
             autocap: None,
             rev: 1,
             protect_facts: std::sync::Mutex::new(None),
@@ -1081,6 +1101,12 @@ impl Session {
 
     /// The current layout (recomputed when the document or view changed).
     pub fn layout(&mut self) -> Arc<DocLayout> {
+        let typing = self.typing_word();
+        self.layout_with(typing)
+    }
+
+    /// [`Session::layout`] with `typing` as the word being typed.
+    fn layout_with(&mut self, typing: Option<wordcraft_layout::TypingWord>) -> Arc<DocLayout> {
         let mode = if self.view.read_mode { ViewMode::Read } else { self.view.mode };
         let width = match mode {
             ViewMode::Read => self.view.read_width,
@@ -1094,7 +1120,6 @@ impl Session {
         let hide_deleted = !self.view.show_markup;
         let deleted = (hide_deleted, self.prefs.markup.hidden_deletions(), self.revisions_in_balloons());
         let outline = (mode == ViewMode::Outline).then(|| self.view.outline.view());
-        let typing = self.typing_word();
         if let Some((r, w, h, m, sp, l, pf, o, hd, n, t)) = &self.layout
             && *r == self.rev
             && (*w == width || mode == ViewMode::Print)
@@ -1171,6 +1196,42 @@ impl Session {
         let (start, end) = typed_range(&self.doc.para_at(&at)?.text, at.off)?;
         Some(TypedWord { at, start, end })
     }
+    /// The page as command `id` would leave it, for a live preview (Insert › Table's grid, #3931):
+    /// the command runs on a copy of the document, with this caret and view, and the copy is laid
+    /// out. The copy comes back with its layout, which is drawn from it: the layout's paragraph
+    /// paths name the copy's paragraphs, not this document's, and so is the copy's selection,
+    /// which is where the caret would be. The document, the selection, the undo history and Repeat
+    /// are untouched. `None` when the command fails or isn't allowed here.
+    pub fn preview_layout(&mut self, id: &str, params: &Value) -> Option<(Document, Selection, Arc<DocLayout>)> {
+        // The word being typed keeps going without a squiggle on the preview: the command moves
+        // the copy's caret off it and may split its paragraph, so it is found again by its place.
+        let typing = self.typing_word();
+        let at = self.sel.focus.clone();
+        let mut copy = Session::with_registry(self.doc.clone(), self.registry.clone());
+        copy.sel = self.sel.clone();
+        copy.column = self.column.clone();
+        copy.widened = self.widened.clone();
+        copy.view = self.view.clone();
+        copy.prefs = self.prefs.clone();
+        copy.path = self.path.clone();
+        copy.file_name = self.file_name.clone();
+        copy.author = self.author.clone();
+        copy.last_highlight = self.last_highlight;
+        copy.system_region = self.system_region.clone();
+        copy.editing_lang = self.editing_lang.clone();
+        // The copy shares the paragraph layouts, so only what the command changed is laid out.
+        std::mem::swap(&mut copy.cache, &mut self.cache);
+        let layout = copy.run(id, params).is_ok().then(|| {
+            let typing = typing.and_then(|t| {
+                let p = copy.doc.para_at(&at)?;
+                (t.end <= p.len()).then_some(wordcraft_layout::TypingWord { rev: p.rev, ..t })
+            });
+            copy.layout_with(typing)
+        });
+        std::mem::swap(&mut copy.cache, &mut self.cache);
+        layout.map(|l| (copy.doc, copy.sel, l))
+    }
+
     /// A layout for output (PDF, images, print): no proofing marks, print view.
     pub fn export_layout(&self) -> Arc<DocLayout> {
         self.export_layout_with(false)
@@ -1221,10 +1282,11 @@ impl Session {
         }
     }
 
-    /// Snapshot for undo before a change.
-    pub fn checkpoint(&mut self, label: &str) {
+    /// Snapshot for undo before a change. Returns whether it took a step: typing that is
+    /// already in an open step is not a new one.
+    pub fn checkpoint(&mut self, label: &str) -> bool {
         if label == "Typing" && self.typing_open {
-            return;
+            return false;
         }
         self.typing_open = label == "Typing";
         self.history.push(Arc::new(Undo {
@@ -1239,6 +1301,9 @@ impl Session {
             self.undo_evicted += 1;
         }
         self.redo.clear();
+        // The newest step is what a joined command merges into.
+        self.join_anchor = true;
+        true
     }
     /// Record `doc`/`sel` as their own undo step after the fact and close the typing group, so
     /// Undo right after an automatic change (AutoFormat, AutoCorrect) reverts only that change.
@@ -1249,6 +1314,7 @@ impl Session {
             self.undo_evicted += 1;
         }
         self.typing_open = false;
+        self.join_anchor = true;
     }
     /// Make the next mutating command part of the previous undo step instead of a new one, so a
     /// drag that runs a command every frame is a single Undo. Call it on every frame of the drag
@@ -1378,6 +1444,7 @@ impl Session {
         self.history.clear();
         self.redo.clear();
         self.typing_open = false;
+        self.join_anchor = false;
     }
 
     /// The version snapshots belong to the document they were taken from: keeping the old ones
@@ -1404,6 +1471,18 @@ impl Session {
         (r.language == "en" && !r.territory.is_empty() && r.territory != "US")
             .then(|| format!("en-{}", r.territory))
             .and_then(|t| wordcraft_proof::lang::normalize_tag(&t))
+    }
+
+    /// The Spanish of the region in effect (`es-MX` on a Mexican system, `es-UY` on a Uruguayan
+    /// one; the ISO 639-2 `spa` counts as Spanish), or Spain's (`es-ES`) when the region's
+    /// language isn't Spanish or it names no territory. A Spanish interface writes new documents in it, so they are proofed in the
+    /// writer's Spanish from the first word (#3360).
+    pub fn region_spanish(&self) -> String {
+        let r = self.region();
+        (matches!(r.language.as_str(), "es" | "spa") && !r.territory.is_empty())
+            .then(|| format!("es-{}", r.territory))
+            .and_then(|t| wordcraft_proof::lang::normalize_tag(&t))
+            .unwrap_or_else(|| "es-ES".into())
     }
 
     /// The unit rulers and dialogs show lengths in: the user's choice, else the region's.
@@ -1457,7 +1536,8 @@ impl Session {
     /// may want to take it back without a trace (cheap: the document's blocks are shared).
     ///
     /// Covered: `doc`, `sel`, the undo stack (its length, and its oldest steps when it is near
-    /// the limit), `redo`, the open typing group, a pending `join_next_undo` and `dirty`. `rev`,
+    /// the limit), `redo`, the open typing group, a pending `join_next_undo` (and whether its
+    /// group has a step to merge into) and `dirty`. `rev`,
     /// `cache` and `layout` are derived (`restore` bumps `rev`). The other fields are not
     /// covered: a caller that lets the command change them (the view, the find state, the
     /// clipboard, macros, the file path…) saves and puts them back itself.
@@ -1475,6 +1555,7 @@ impl Session {
             sel,
             view: _,
             pending: _,
+            last_highlight: _,
             path: _,
             file_name: _,
             // The custom dictionary file, like the file path: host wiring, not an edit.
@@ -1502,6 +1583,7 @@ impl Session {
             redo,
             typing_open,
             join_next,
+            join_anchor,
             autocap: _,
             rev: _,
             protect_facts: _,
@@ -1566,6 +1648,7 @@ impl Session {
             redo: redo.clone(),
             typing_open: *typing_open,
             join_next: *join_next,
+            join_anchor: *join_anchor,
             dirty: *dirty,
         }
     }
@@ -1574,7 +1657,7 @@ impl Session {
     /// selection or undo/redo (undo steps the limit pushed out meanwhile come back). The layout
     /// is recomputed.
     pub fn restore(&mut self, snap: EditSnapshot) {
-        let EditSnapshot { doc, sel, history_len, evicted, head, redo, typing_open, join_next, dirty } = snap;
+        let EditSnapshot { doc, sel, history_len, evicted, head, redo, typing_open, join_next, join_anchor, dirty } = snap;
         let gone = usize::try_from(self.undo_evicted.saturating_sub(evicted)).unwrap_or(usize::MAX);
         if gone > 0 {
             let back = gone.min(head.len());
@@ -1589,6 +1672,7 @@ impl Session {
         self.redo = redo;
         self.typing_open = typing_open;
         self.join_next = join_next;
+        self.join_anchor = join_anchor;
         self.touch();
         self.dirty = dirty;
     }
@@ -1621,6 +1705,26 @@ impl Session {
         (spec.enabled)(self).or_else(|| if spec.mutates { crate::cmd::protect::greyed_out(self, id, || self.protect_facts()) } else { None })
     }
 
+    /// Put the revision back to `rev` after a command that changed nothing or failed. What the
+    /// command cached at the revision it touched to is dropped: that number comes round again
+    /// with the next edit, for a different document.
+    fn restore_rev(&mut self, rev: u64) {
+        if self.rev == rev {
+            return;
+        }
+        self.rev = rev;
+        if self.layout.as_ref().is_some_and(|l| l.0 != rev) {
+            self.layout = None;
+        }
+        if self.find.highlights.as_ref().is_some_and(|(r, _)| *r != rev) {
+            self.find.highlights = None;
+        }
+        let facts = self.protect_facts.get_mut().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if facts.as_ref().is_some_and(|((_, r, _), _)| *r != rev) {
+            *facts = None;
+        }
+    }
+
     /// [`crate::cmd::protect::Facts`] for the document as it is now, cached per revision.
     fn protect_facts(&self) -> crate::cmd::protect::Facts {
         let key = (self.document_id, self.rev, self.author.clone());
@@ -1633,6 +1737,15 @@ impl Session {
         let f = crate::cmd::protect::Facts::of(self);
         *cache = Some((key, f));
         f
+    }
+
+    /// Whether the command changed nothing: the document, the selection, the formatting
+    /// waiting at the caret and the column selection are as they were before it ran.
+    ///
+    /// A command that changes nothing is not an edit: it adds no undo step, marks no
+    /// unsaved changes, forces no relayout and leaves the redo stack alone (#23).
+    fn unchanged(&self, doc: &Document, sel: &Selection, column: &Option<ColumnBlock>, pending: &Option<CharProps>) -> bool {
+        doc.same_content(&self.doc) && *sel == self.sel && *column == self.column && *pending == self.pending
     }
 
     /// Run a command by id with JSON params (the single entry point for the UI, CLI, MCP and
@@ -1692,10 +1805,25 @@ impl Session {
         } else {
             None
         };
+        // The formatting waiting at the caret (⌘B with nothing selected): an undo step restores
+        // it, so a command that only changes it is an edit.
+        let pending_before = spec.mutates.then(|| self.pending.clone());
+        // Which document is open. A command that replaces the document (a mail merge) opens a
+        // new one, with a new undo history: it is not an edit of this document, whatever the
+        // new document holds.
+        let document_id_before = self.document_id;
+        // Whether the document has unsaved changes, and the revision its layout is keyed on: a
+        // command that changes nothing leaves both as they were, and a failed one leaves no
+        // trace.
+        let dirty_before = spec.mutates.then_some(self.dirty);
+        let rev_restore = spec.mutates.then_some(self.rev);
         // These mutating commands can replace the open document and discard its saved versions.
         // Keep the versions until the command and the protected-region post-check have both
         // succeeded; rejected commands must leave the old document and its snapshots together.
-        let replaces_document = matches!(id, "review.compare" | "review.combine" | "mailings.finish" | "mailings.envelopes" | "mailings.labels");
+        // `mailings.finish` with a path saves the merged copy there and leaves the open
+        // document alone, so it replaces nothing.
+        let replaces_document = matches!(id, "review.compare" | "review.combine" | "mailings.envelopes" | "mailings.labels")
+            || (id == "mailings.finish" && crate::p::str(params, "path").is_none());
         let versions_before = replaces_document.then(|| self.versions.clone());
         let identity_before = replaces_document.then(|| {
             (
@@ -1712,10 +1840,15 @@ impl Session {
         if spec.mutates && !typing {
             self.typing_open = false;
         }
+        // Whether this command pushed an undo step (a no-op command's step is dropped below,
+        // leaving its undo group without one).
+        let mut pushed = false;
         if spec.mutates {
             let label = if typing { "Typing" } else { spec.label };
-            if !join || self.history.is_empty() {
-                self.checkpoint(label);
+            // A joined command merges into its group's step; a group whose first command
+            // changed nothing has none, so the next command in it starts one (#4001).
+            if !join || self.history.is_empty() || !self.join_anchor {
+                pushed = self.checkpoint(label);
             }
         } else if !spec.id.starts_with("caret.") && !spec.id.starts_with("view.") {
             // Non-mutating commands other than caret movement keep the typing group.
@@ -1733,6 +1866,7 @@ impl Session {
         let default_language_before = self.prefs.default_language.clone();
         let run = spec.run;
         let mutates = spec.mutates;
+        let rev_before = self.rev;
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| crate::cmd::column::dispatch(self, id, mutates, run, params)));
         let mut result = match result {
             Ok(r) => r,
@@ -1751,17 +1885,63 @@ impl Session {
         }
         match &result {
             Ok(_) => {
+                let mut no_op = false;
                 if spec.mutates {
                     // Formatting changed while tracking becomes a formatting revision.
                     if let Some((before, ..)) = &before_doc {
                         crate::cmd::fmt_revisions::record(self, id, before);
                     }
-                    self.touch();
                     self.doc.ensure_nonempty();
                     self.doc.prune_text_boxes();
-                    // Glued connectors follow the shapes they join.
-                    if crate::cmd::connectors::reroutes_after(id) && crate::cmd::connectors::reroute(self) {
+                    // Whether the command left the document, the selection and the formatting
+                    // waiting at the caret as they were. A command that replaces the document —
+                    // a mail merge, a comparison — is not an edit of this one, whatever the new
+                    // document holds: `replaces_document` names the commands that may replace
+                    // it, and `document_id` catches any other that does (through
+                    // `set_document`, which starts a new history the old one must not overwrite).
+                    let unchanged = |s: &Session| match (&before_doc, &pending_before) {
+                        (Some((doc, sel, _, _, _, _, column)), Some(pending)) => {
+                            !replaces_document && s.document_id == document_id_before && s.unchanged(doc, sel, column, pending)
+                        }
+                        _ => false,
+                    };
+                    let changed = !unchanged(self);
+                    if changed {
+                        // The layout the connectors are rerouted against is the new one.
                         self.touch();
+                    }
+                    // Glued connectors follow the shapes they join.
+                    let rerouted = crate::cmd::connectors::reroutes_after(id) && crate::cmd::connectors::reroute(self);
+                    if rerouted {
+                        self.touch();
+                    }
+                    // A command that changed nothing is not an edit (#23): it adds no undo
+                    // step, marks no unsaved changes, forces no relayout and leaves the redo
+                    // stack alone. What it left behind is compared with what it started from,
+                    // after the reroute: a reroute that moved a connector is an edit of its own.
+                    no_op = !changed && !rerouted && unchanged(self);
+                    if no_op {
+                        // The step the dispatch pushed is not an edit: put the stacks back as
+                        // they were, so the redo stack survives and no step is evicted. The
+                        // group it belonged to is left without a step of its own, so the next
+                        // command in it starts one.
+                        if let Some((_, _, history, redo, typing_open, evicted, _)) = &before_doc {
+                            self.history = history.clone();
+                            self.redo = redo.clone();
+                            self.typing_open = *typing_open;
+                            self.undo_evicted = *evicted;
+                        }
+                        if let Some(dirty) = dirty_before {
+                            self.dirty = dirty;
+                        }
+                        if let Some(rev) = rev_restore {
+                            let touched = self.rev;
+                            self.restore_rev(rev);
+                            crate::cmd::draw::rekey_lasso(self, touched, rev);
+                        }
+                        if pushed {
+                            self.join_anchor = false;
+                        }
                     }
                 }
                 self.clamp_selection();
@@ -1773,11 +1953,11 @@ impl Session {
                 if !spec.mutates && self.sel != sel_before {
                     self.typing_open = false;
                 }
-                if spec.mutates && !matches!(id, "edit.undo" | "edit.redo") {
+                if spec.mutates && !no_op && !matches!(id, "edit.undo" | "edit.redo") {
                     self.note_edit();
                 }
                 // Outline view: collapsed headings follow edits; the caret stays where it shows.
-                crate::cmd::outline::after_command(self, &sel_before);
+                crate::cmd::outline::after_command(self, &sel_before, self.rev != rev_before);
                 // Extra selected objects last until something else is edited or selected; formatting
                 // them keeps them selected, as in Word.
                 if !matches!(id, "select.addObject" | "arrange.ungroup" | "shape.fill" | "shape.effects") && (spec.mutates || self.sel != sel_before)
@@ -1810,6 +1990,16 @@ impl Session {
                     // The steps the command pushed out are back, so they no longer count as gone.
                     self.undo_evicted = ev;
                     self.column = c;
+                    // Its step is gone with them: its undo group has none to merge into.
+                    if pushed {
+                        self.join_anchor = false;
+                    }
+                }
+                if let Some(dirty) = dirty_before {
+                    self.dirty = dirty;
+                }
+                if let Some(rev) = rev_restore {
+                    self.restore_rev(rev);
                 }
                 if let Some(b) = blocks_before {
                     self.building_blocks = b;
