@@ -99,7 +99,7 @@ pub fn anchor_rect(selection_top: f32, selection_left: f32, viewport: Rect) -> O
 /// Where the bar and the controls in it were drawn last frame (`[bar, controls]`), kept in the
 /// context's memory under this id so tests can check that no control spills out of the bar.
 pub fn shown_id() -> egui::Id {
-    egui::Id::new("wc_mini_toolbar").with("shown")
+    egui::Id::unique("wc_mini_toolbar").with("shown")
 }
 
 /// Whether the bar may be shown for the current app state.
@@ -181,7 +181,7 @@ pub fn show(app: &mut WordApp, ctx: &egui::Context, selection: Rect, viewport: R
     // the topmost layer, so a click on the bar never reaches the document underneath. Clipped to
     // the document area (`constrain_to` without `constrain`, which would push it inside), the part
     // past its edge takes no clicks either, so the ribbon and the rulers under it keep them.
-    let area = egui::Area::new(egui::Id::new("wc_mini_toolbar")).order(Order::Middle).interactable(true);
+    let area = egui::Area::new(egui::Id::unique("wc_mini_toolbar")).order(Order::Middle).interactable(true);
     let area = area.constrain_to(viewport).constrain(false).fixed_pos(bar.min);
     area.show(ctx, |ui| {
         ui.set_clip_rect(shown);
@@ -269,7 +269,7 @@ fn content(app: &mut WordApp, ui: &mut egui::Ui, t: &Tokens) {
             st.get("size").and_then(Value::as_f64).map(|s| if s.fract() == 0.0 { format!("{s:.0}") } else { s.to_string() }).unwrap_or_default();
         let sizes: Vec<String> =
             wordcraft_engine::cmd::format::SIZES.iter().map(|s| if s.fract() == 0.0 { format!("{s:.0}") } else { s.to_string() }).collect();
-        if let Some(v) = widgets::combo(ui, "mini_size", COMBO_SIZE_W, &size, &sizes, None)
+        if let Some(v) = widgets::combo_hint(ui, "mini_size", COMBO_SIZE_W, &size, &sizes, None, tl!("Font Size"))
             && let Ok(x) = v.trim().parse::<f64>()
         {
             let _ = app.run("format.size", json!({"size": x}));
@@ -548,7 +548,7 @@ mod tests {
 
     /// The bar's layer, when it was drawn last frame.
     fn bar_layer(h: &egui_kittest::Harness<'static, WordApp>) -> Option<egui::LayerId> {
-        h.ctx.memory(|m| m.areas().visible_layer_ids().into_iter().find(|l| l.id == egui::Id::new("wc_mini_toolbar")))
+        h.ctx.memory(|m| m.areas().visible_layer_ids().into_iter().find(|l| l.id == egui::Id::unique("wc_mini_toolbar")))
     }
 
     fn click_at(h: &mut egui_kittest::Harness<'static, WordApp>, at: egui::Pos2) {
@@ -800,7 +800,13 @@ mod tests {
         h.event(egui::Event::PointerMoved(page.center()));
         h.step();
         let delta = egui::vec2(0.0, target - line.min.y);
-        h.event(egui::Event::MouseWheel { unit: egui::MouseWheelUnit::Point, delta, phase: egui::TouchPhase::Start, modifiers: Default::default() });
+        h.event(egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta,
+            phase: egui::TouchPhase::Start,
+            modifiers: Default::default(),
+            source: egui::MouseWheelSource::Unknown,
+        });
         h.step();
         h.state_mut().canvas.wheel = Default::default();
         steps(&mut h);
@@ -896,7 +902,7 @@ mod tests {
         a.run("select.all", json!({})).unwrap();
         let mut h = egui_kittest::Harness::builder().with_size(Vec2::new(400.0, 400.0)).build_ui_state(
             |ui, app: &mut WordApp| {
-                egui::Area::new(egui::Id::new("font_colour_probe")).fixed_pos(pos2(50.0, 50.0)).show(ui.ctx(), |ui| {
+                egui::Area::new(egui::Id::unique("font_colour_probe")).fixed_pos(pos2(50.0, 50.0)).show(ui.ctx(), |ui| {
                     font_color_menu(ui, app);
                 });
             },
@@ -915,10 +921,10 @@ mod tests {
     fn picking_a_highlight_swatch_returns_focus_to_the_document() {
         let mut a = WordApp::new(wordcraft_engine::Session::new(wordcraft_doc::Document::from_text("Hello")), Default::default());
         a.run("select.all", json!({})).unwrap();
-        let origin = egui::Id::new("hl_swatch_origin");
+        let origin = egui::Id::unique("hl_swatch_origin");
         let mut h = egui_kittest::Harness::builder().with_size(Vec2::new(400.0, 300.0)).build_ui_state(
             move |ui, app: &mut WordApp| {
-                egui::Area::new(egui::Id::new("hl_probe")).fixed_pos(pos2(100.0, 100.0)).show(ui.ctx(), |ui| {
+                egui::Area::new(egui::Id::unique("hl_probe")).fixed_pos(pos2(100.0, 100.0)).show(ui.ctx(), |ui| {
                     ui.ctx().data_mut(|d| d.insert_temp(origin, ui.next_widget_position()));
                     highlight_menu(ui, app);
                 });
@@ -963,7 +969,7 @@ mod tests {
                         fonts = true;
                         return;
                     }
-                    egui::Area::new(egui::Id::new("mini_align_probe")).fixed_pos(pos2(10.0, 10.0)).show(ui.ctx(), |ui| {
+                    egui::Area::new(egui::Id::unique("mini_align_probe")).fixed_pos(pos2(10.0, 10.0)).show(ui.ctx(), |ui| {
                         let t = Tokens::get(ui.ctx());
                         content(app, ui, &t);
                     });

@@ -3,7 +3,6 @@
 
 mod automation_args;
 mod script;
-mod update_check;
 
 use std::ffi::{OsStr, OsString};
 use std::fmt;
@@ -37,10 +36,13 @@ USAGE:
                                               {\"file\"?, \"template\"?, \"commands\": [{\"command\": id,
                                               \"params\"?: {…}} | id, …], \"save\"?: [OUT, …]}; save
                                               formats follow the extension (docx and pdf in one run);
-                                              relative paths resolve against the script's folder
+                                              relative paths resolve against the script's folder.
+                                              file.new and file.open open another document and
+                                              make it active; later commands and the saves work on
+                                              the active one; view.switchWindows lists the open
+                                              documents and with {\"id\": N} makes one active
   wordcraft-cli commands [--json]             list every command
   wordcraft-cli parity [--markdown]           feature-catalog parity
-  wordcraft-cli update --check                ask GitHub for a newer release (JSON)
   wordcraft-cli mcp [--connect HOST:PORT | --author NAME] [--automation-read-root DIR] [--automation-write-root DIR]
                                               MCP server on stdio (headless, or bridged to the app).
                                               --automation-read-root / --automation-write-root confine
@@ -72,7 +74,7 @@ app's options turn it on (law.enabled), or with WORDCRAFT_LAW=1 for one run. See
 ";
 
 /// The subcommands, in `USAGE` order; `--help` or `-h` after any of them prints `USAGE` (#968).
-const SUBCOMMANDS: &[&str] = &["convert", "info", "text", "inspect", "render", "run", "commands", "parity", "update", "mcp", "zotero"];
+const SUBCOMMANDS: &[&str] = &["convert", "info", "text", "inspect", "render", "run", "commands", "parity", "mcp", "zotero"];
 
 fn wants_help(cmd: &str, rest: &[String]) -> bool {
     SUBCOMMANDS.contains(&cmd) && rest.iter().any(|a| a == "--help" || a == "-h")
@@ -243,54 +245,6 @@ fn set_author(s: &mut Session, name: &str) -> Result<(), String> {
     s.run("file.setAuthor", &json!({"name": name})).map(|_| ()).map_err(|e| format!("--author: {e}"))
 }
 
-/// Run `file.checkForUpdates` for `wordcraft-cli update --check` and return the result. The HTTP
-/// hook and the install-detection environment are injected so tests run offline and independent of
-/// the host; the response must stay a single JSON value on stdout, with no probe output leaking in.
-fn run_update_check(http: wordcraft_engine::update::HttpGet, env: Option<wordcraft_engine::update::EnvReadBox>) -> Result<Value, String> {
-    let mut s = Session::new(wordcraft_doc::Document::new());
-    s.update_http = Some(http);
-    s.update_env = env;
-    // A test hook (`WORDCRAFT_UPDATE_CHECK_EXE`) lets the subprocess test put the running path
-    // under `/usr/bin` so install detection actually probes `dpkg-query`; otherwise the CLI's own
-    // path is used.
-    if let Ok(exe) = std::env::var("WORDCRAFT_UPDATE_CHECK_EXE") {
-        s.update_exe = Some(exe);
-    } else if let Ok(exe) = std::env::current_exe() {
-        s.update_exe = Some(exe.to_string_lossy().into_owned());
-    }
-    s.run("file.checkForUpdates", &serde_json::json!({"force": true})).map_err(|e| e.to_string())
-}
-
-/// Pretty JSON for `wordcraft-cli update --check` (one value, trailing newline).
-fn format_update_check_json(v: &Value) -> String {
-    serde_json::to_string_pretty(v).unwrap_or_default()
-}
-
-/// Build the headless MCP session, wiring the same update HTTP hook the desktop app uses so
-/// `file.checkForUpdates` is reachable through MCP too (#15). `http` is injected so tests run with
-/// an offline fake and no request ever leaves the machine.
-fn headless_session(
-    http: wordcraft_engine::update::HttpGet,
-    author: Option<String>,
-    roots: Option<std::sync::Arc<wordcraft_engine::file_access::AutomationRoots>>,
-) -> Result<wordcraft_mcp::Headless, String> {
-    let mut headless = wordcraft_mcp::Headless::default();
-    headless.session.update_http = Some(http);
-    // LawCraft goes in before confinement: its profiles load from the settings folder.
-    enable_law(&mut headless.session);
-    if let Some(roots) = roots {
-        // Every thread of this process, not only the server's: nothing reaches past the roots.
-        wordcraft_engine::file_access::confine_process(roots.clone());
-        let show = |root: Option<&std::path::Path>| root.map_or_else(|| "none".to_string(), |r| r.display().to_string());
-        eprintln!("wordcraft-cli: files confined: read root {}, write root {}", show(roots.read_root()), show(roots.write_root()));
-        headless = headless.with_automation_roots(Some(roots));
-    }
-    if let Some(name) = author {
-        set_author(&mut headless.session, &name)?;
-    }
-    Ok(headless)
-}
-
 fn arg_value(args: &[String], name: &str) -> Option<String> {
     args.iter().position(|a| a == name).and_then(|i| args.get(i + 1)).cloned()
 }
@@ -425,7 +379,6 @@ const RUN_OPTIONS: &[OptionSpec] = &[
 const COMMANDS_OPTIONS: &[OptionSpec] = &[OptionSpec { name: "--json", takes_value: false }];
 const PARITY_OPTIONS: &[OptionSpec] = &[OptionSpec { name: "--markdown", takes_value: false }];
 const MCP_OPTIONS: &[OptionSpec] = &[OptionSpec { name: "--connect", takes_value: true }, OptionSpec { name: "--author", takes_value: true }];
-const UPDATE_OPTIONS: &[OptionSpec] = &[OptionSpec { name: "--check", takes_value: false }];
 const ZOTERO_OPTIONS: &[OptionSpec] = &[
     OptionSpec { name: "--cmd", takes_value: true },
     OptionSpec { name: "--save", takes_value: true },
@@ -493,6 +446,8 @@ fn valid_connect_addr(addr: &str) -> bool {
     !host.is_empty() && port.parse::<u16>().is_ok()
 }
 
+/// Run the subcommand named by `args` (the command line after the program name). Files named
+/// there are opened by their real names, which may not be valid Unicode.
 fn run<S: AsRef<OsStr>>(args: &[S]) -> Result<(), Failure> {
     let script_path = script_operand(args);
     let (args, file) = text_args(args)?;
@@ -591,10 +546,14 @@ fn run<S: AsRef<OsStr>>(args: &[S]) -> Result<(), Failure> {
             let mut s = match (from_file, from_template) {
                 (Some(f), _) => with_law(open(&f, password.as_deref())?),
                 // Both go through `file.new`, which puts a blank document on the region's paper (#3152).
+                // `file.new` opens beside the session's first document, which is then closed: the
+                // run starts with one open document.
                 (None, t) => {
                     let mut s = with_law(session(wordcraft_doc::Document::new()));
+                    let first = s.document_id();
                     let params = t.map_or_else(|| json!({}), |t| json!({"template": t}));
                     s.run("file.new", &params).map_err(|e| e.to_string())?;
+                    s.close_document(first).map_err(|e| e.to_string())?;
                     s
                 }
             };
@@ -682,14 +641,6 @@ fn run<S: AsRef<OsStr>>(args: &[S]) -> Result<(), Failure> {
                 write_stdout(|o| writeln!(o, "{}", serde_json::to_string_pretty(&p).unwrap_or_default()))
             }
         }
-        "update" => {
-            validate_options("update", &rest, UPDATE_OPTIONS)?;
-            if !rest.iter().any(|a| a == "--check") {
-                return Err(format!("update: pass --check\n\n{USAGE}").into());
-            }
-            let v = run_update_check(update_check::http_get(), None)?;
-            write_stdout(|o| writeln!(o, "{}", format_update_check_json(&v)))
-        }
         "mcp" => {
             let (roots, rest) = automation_roots("mcp", &rest)?;
             validate_options("mcp", &rest, MCP_OPTIONS)?;
@@ -729,7 +680,21 @@ fn run<S: AsRef<OsStr>>(args: &[S]) -> Result<(), Failure> {
                         }
                     }
                 }
-                None => Box::new(headless_session(update_check::http_get(), author, roots)?),
+                None => {
+                    let mut headless = wordcraft_mcp::Headless::default();
+                    enable_law(&mut headless.session);
+                    if let Some(roots) = roots {
+                        // Every thread of this process, not only the server's: nothing reaches past the roots.
+                        wordcraft_engine::file_access::confine_process(roots.clone());
+                        let show = |root: Option<&std::path::Path>| root.map_or_else(|| "none".to_string(), |r| r.display().to_string());
+                        eprintln!("wordcraft-cli: files confined: read root {}, write root {}", show(roots.read_root()), show(roots.write_root()));
+                        headless = headless.with_automation_roots(Some(roots));
+                    }
+                    if let Some(name) = author {
+                        set_author(&mut headless.session, &name)?;
+                    }
+                    Box::new(headless)
+                }
             };
             let mut server = wordcraft_mcp::Server::new(backend);
             let stdin = std::io::stdin();
@@ -761,14 +726,14 @@ fn run<S: AsRef<OsStr>>(args: &[S]) -> Result<(), Failure> {
             let out = wordcraft_zotero::client::run_command(&opts, command, &mut |call| {
                 let r = bridge.handle(&mut s, &mut host, call);
                 if trace {
-                    eprintln!("← {} {}", call.method, clip(&Value::Array(call.args.clone()).to_string()));
-                    eprintln!("→ {}", clip(&String::from_utf8_lossy(&wordcraft_zotero::wire::encode_reply(&r))));
+                    eprintln!("← {} {}", escape_peer(&call.method), escape_peer(&clip(&Value::Array(call.args.clone()).to_string())));
+                    eprintln!("→ {}", escape_peer(&clip(&String::from_utf8_lossy(&wordcraft_zotero::wire::encode_reply(&r)))));
                 }
                 r
             })
             .map_err(|e| e.to_string())?;
             for a in &host.alerts {
-                eprintln!("Zotero: {a}");
+                eprintln!("Zotero: {}", escape_peer(a));
             }
             eprintln!("{} calls, {}", out.calls, if out.completed { "completed" } else { "ended without completing (cancelled?)" });
             if let Some(o) = arg_value(&rest, "--save") {
@@ -789,6 +754,27 @@ fn clip(s: &str) -> String {
         Some((i, _)) => format!("{}…", s.get(..i).unwrap_or(s)),
         None => s.to_string(),
     }
+}
+
+/// Text from another program (Zotero, or whatever answered on its port) for one diagnostic
+/// line: backslashes, control characters (newline, escape, C1…), line separators and bidi
+/// overrides are shown as escapes (`\\`, `\n`, `\u{1b}`), so it can't end its line, drive the
+/// terminal or pass for other output.
+fn escape_peer(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if c.is_control() || matches!(c, '\u{061c}' | '\u{200e}' | '\u{200f}' | '\u{2028}'..='\u{202e}' | '\u{2066}'..='\u{2069}') => {
+                out.extend(c.escape_unicode())
+            }
+            c => out.push(c),
+        }
+    }
+    out
 }
 
 fn parity_markdown(p: &Value) -> String {
@@ -851,6 +837,15 @@ mod tests {
 
     fn args(values: &[&str]) -> Vec<String> {
         values.iter().map(|value| (*value).into()).collect()
+    }
+
+    #[test]
+    fn peer_text_stays_on_one_visible_line() {
+        let alert = "Done.\nwrote /etc/passwd\r\u{1b}[2J\u{9b}31m\u{202e}txt.exe\\n\tok é";
+        let shown = escape_peer(alert);
+        assert_eq!(shown, "Done.\\nwrote /etc/passwd\\r\\u{1b}[2J\\u{9b}31m\\u{202e}txt.exe\\\\n\\tok é");
+        assert!(!shown.chars().any(|c| c.is_control()));
+        assert_eq!(escape_peer("Citation (Doe, 2020) — “ok”"), "Citation (Doe, 2020) — “ok”");
     }
 
     #[test]
@@ -1395,63 +1390,5 @@ mod tests {
         let s = script::parse(r#"{"commands":["caret.docEnd"],"save":["o.docx"]}"#, None).unwrap();
         assert_eq!(s.save, vec!["o.docx".to_string()]);
         assert_eq!(s.commands.len(), 1);
-    }
-
-    /// #15: the headless MCP backend must carry the update HTTP hook, so `file.checkForUpdates`
-    /// works through MCP. The injected fake proves it with no real request.
-    #[test]
-    fn headless_mcp_checks_for_updates_offline() {
-        use std::sync::{Arc, Mutex};
-        let calls = Arc::new(Mutex::new(Vec::new()));
-        let c = Arc::clone(&calls);
-        let http: wordcraft_engine::update::HttpGet = Arc::new(move |url, _max| {
-            c.lock().unwrap_or_else(|e| e.into_inner()).push(url.to_string());
-            Ok(br#"{"tag_name":"v0.0.1","draft":false,"prerelease":false,"assets":[]}"#.to_vec())
-        });
-        let mut h = headless_session(http, None, None).expect("headless backend");
-        assert!(h.session.update_http.is_some(), "the hook is installed");
-        let r = wordcraft_mcp::Backend::call(&mut h, "engine.execute", json!({"command": "file.checkForUpdates", "params": {"force": true}}))
-            .expect("mcp call");
-        assert_eq!(r["status"], "current");
-        let seen = calls.lock().unwrap_or_else(|e| e.into_inner()).clone();
-        assert_eq!(seen, vec![wordcraft_engine::update::LATEST_API.to_string()], "exactly one offline release request");
-    }
-
-    /// #15: `wordcraft-cli update --check` prints exactly one JSON value. Install detection runs
-    /// inside the command, so this pins the response shape at the CLI boundary: `serde_json` rejects
-    /// any probe output that precedes or follows the value. The engine's captured probe helper is
-    /// what keeps a `dpkg-query -S` from inheriting stdout in the first place.
-    #[test]
-    fn update_check_prints_one_json_value() {
-        struct FakeEnv;
-        impl wordcraft_engine::update::EnvRead for FakeEnv {
-            fn flatpak(&self) -> bool {
-                false
-            }
-            fn appimage(&self) -> Option<String> {
-                None
-            }
-            fn install_override(&self) -> Option<wordcraft_engine::update::InstallKind> {
-                Some(wordcraft_engine::update::InstallKind::Unknown)
-            }
-            fn windows(&self) -> bool {
-                false
-            }
-            fn macos(&self) -> bool {
-                false
-            }
-            fn linux(&self) -> bool {
-                true
-            }
-            fn linux_deb_package(&self, _exe: &str) -> bool {
-                false
-            }
-        }
-        let http: wordcraft_engine::update::HttpGet =
-            std::sync::Arc::new(|_, _| Ok(br#"{"tag_name":"v0.0.1","draft":false,"prerelease":false,"assets":[]}"#.to_vec()));
-        let v = run_update_check(http, Some(std::sync::Arc::new(FakeEnv))).expect("offline check");
-        let text = format_update_check_json(&v);
-        let _: Value = serde_json::from_str(text.trim()).expect("the response is one JSON value");
-        assert!(text.trim_start().starts_with('{') && text.trim_end().ends_with('}'), "no probe output wraps the JSON: {text:?}");
     }
 }

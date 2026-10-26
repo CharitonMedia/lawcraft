@@ -27,3 +27,5 @@ hayro-cmap = "0.1"
 [target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
 # The browser clock (`SystemTime::now()` panics on wasm32-unknown-unknown).
 js-sys = "0.3"
+
+[dev-dependencies]

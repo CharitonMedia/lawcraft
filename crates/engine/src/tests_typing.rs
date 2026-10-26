@@ -3321,6 +3321,27 @@ fn tab_with_a_partial_selection_still_inserts_a_tab() {
     assert_eq!(paras(&s), vec![para("H\t world", None)]);
 }
 
+/// Tab with a whole paragraph selected indents it as one Undo step: the selection stays while
+/// the indent is applied, and Undo restores both the indentation and that same selection. A
+/// partial selection still types a tab character (the test above), and Tab in a table cell still
+/// navigates (the table tests above).
+#[test]
+fn tab_with_a_whole_paragraph_selected_undoes_indent_and_selection_together() {
+    let mut s = typed("Hello world");
+    run(&mut s, "select.paragraph", json!({}));
+    let selected = s.sel.clone();
+    let depth = s.undo_depth();
+    run(&mut s, "text.tab", json!({}));
+    assert_eq!(s.doc.plain_text(StoryRef::Body), "Hello world", "Tab indents, it types no tab");
+    assert_eq!(s.sel, selected, "the whole paragraph stays selected");
+    assert_eq!(indents(&s), (Some(36.0), None));
+    assert_eq!(s.undo_depth(), depth + 1, "one paragraph, one Undo step");
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(indents(&s), (None, None), "Undo takes the indent back");
+    assert_eq!(s.sel, selected, "and restores the selection the indent was applied to");
+    assert_eq!(paras(&s), vec![para("Hello world", None)]);
+}
+
 /// #2848: "Add a period with double-space" (an AutoFormat As You Type switch, off by default):
 /// a second Space after a word, a number or a closing bracket or quote turns the first into a
 /// period. Undo puts the two spaces back; other punctuation, a lone space and a run of three

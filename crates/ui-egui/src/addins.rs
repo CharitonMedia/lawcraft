@@ -223,7 +223,7 @@ pub fn page(app: &mut WordApp, ui: &mut Ui) {
         let mut checked = on;
         // Why the last change didn't go through (an add-in that couldn't save stays on), shown
         // under its switch until the next change.
-        let error_id = egui::Id::new(("addin_error", id.as_str()));
+        let error_id = egui::Id::unique(("addin_error", id.as_str()));
         if ui.checkbox(&mut checked, name.as_str()).changed() {
             match app.run("file.options", json!({"modules": {id.clone(): checked}})) {
                 Err(e) => {

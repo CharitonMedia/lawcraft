@@ -79,6 +79,10 @@ fn rename(s: &mut Session, v: &Value) -> CmdResult {
     Ok(json!({"name": name, "path": s.path}))
 }
 
+/// Builds the file and document command table: rename, new, open, save, save as and encryption,
+/// PDF/PNG/print output and print settings, close, properties and info, author and privacy
+/// settings, and document inspection and text access. Recovery, compatibility, sharing, autosave,
+/// `file.newFromTemplate` and `file.saveTemplate` are registered in [`super::tools::specs`].
 pub fn specs() -> Vec<CommandSpec> {
     vec![
         CommandSpec::new("file.rename", "Rename Document", "File › Info", rename).params(r#"{"name": string (document name; its extension is kept, so the name may be given with or without it)}"#).pure(),
@@ -138,8 +142,11 @@ pub fn specs() -> Vec<CommandSpec> {
             sel_result(s)
         })
         .key("Mod+W / Mod+F4")
-        .params(r#"{"force"?: bool (desktop app's control channel and MCP bridge only: without it a document with unsaved changes is an error and stays open; with it the changes are discarded. Headless sessions never ask)}"#)
+        .params(r#"{"force"?: bool (desktop app's control channel and MCP bridge only: without it a document with unsaved changes is an error and stays open; with it the changes are discarded. Headless sessions never ask; file.closeDocument closes a document there)}"#)
         .pure(),
+        CommandSpec::new("file.closeDocument", "Close Document", "Agents", close_document)
+            .params(r#"{"id"?: n (an open document, see view.switchWindows; default the active one), "force"?: bool (discard unsaved changes; without it a document with unsaved changes is an error and stays open)} → {"closed": id, "active": id, "documents": [{"id", "title", "path", "dirty", "active"}]}; closing the last document leaves a new blank one"#)
+            .pure(),
         CommandSpec::new("file.properties", "Properties", "File › Info", properties)
             .params(r#"{"title"?, "subject"?, "author"?, "keywords"?, "comments"?, "category"?, "custom"?: {name: string | null (removes)}}"#),
         CommandSpec::new("file.info", "Info", "File", info).pure(),
@@ -189,6 +196,10 @@ pub fn specs() -> Vec<CommandSpec> {
             let text = p::req_str(v, "text")?;
             let d = Document::from_text(text);
             s.doc.body = d.body;
+            // The body is new even though the document id stays: a live IME composition (or an
+            // equation editing session at the same offset) belongs to the old content.
+            s.note_body_replaced();
+            s.math = None;
             s.sel = crate::Selection::caret(s.doc.start_of(StoryRef::Body));
             sel_result(s)
         })
@@ -201,7 +212,8 @@ fn privacy(s: &Session) -> Value {
     json!({"removePersonalInfo": s.doc.settings.remove_personal_info, "removeDateTime": s.doc.settings.remove_date_time})
 }
 
-/// Create a blank document in the saved proofing language, or use the requested template.
+/// Open a new document beside the open ones and make it active: a blank one in the saved
+/// proofing language, or the requested template.
 fn new(s: &mut Session, v: &Value) -> CmdResult {
     let doc = match p::str(v, "template").unwrap_or("blank") {
         "sample" => crate::sample::sample_document(),
@@ -210,14 +222,13 @@ fn new(s: &mut Session, v: &Value) -> CmdResult {
         "report" => crate::sample::report(),
         _ => normal_document(s),
     };
-    s.set_document(doc);
-    s.path = None;
+    s.add_document(doc);
     sel_result(s)
 }
 
 /// A blank document on the Normal template: the region's paper (#838), written in the editing
 /// language (the templates' text is English).
-fn normal_document(s: &Session) -> Document {
+pub(crate) fn normal_document(s: &Session) -> Document {
     let mut d = s.blank_document();
     if let Some(lang) = s.prefs.default_language.as_ref().or(s.editing_lang.as_ref()) {
         d.styles.default_chr.lang = Some(lang.clone());
@@ -225,12 +236,22 @@ fn normal_document(s: &Session) -> Document {
     d
 }
 
-/// Open a document, using the saved proofing default only for plain text and Markdown.
+/// Open a document, using the saved proofing default only for plain text and Markdown. A file
+/// that is already open becomes the active document instead (`"alreadyOpen": true`). The file
+/// replaces an untouched blank document; otherwise it opens beside the open documents.
 fn open(s: &mut Session, v: &Value) -> CmdResult {
     let Some(path) = p::str(v, "path") else {
         s.push_ui_request(json!({"open": "openFile"}));
         return sel_result(s);
     };
+    if p::str(v, "data").is_none()
+        && let Some(id) = s.find_open(std::path::Path::new(path))
+    {
+        s.activate(id)?;
+        return Ok(
+            json!({"path": s.path, "paragraphs": s.doc.paragraph_count(), "words": s.doc.word_count(), "encrypted": s.password.is_some(), "alreadyOpen": true, "id": id}),
+        );
+    }
     let password = p::str(v, "password");
     let opened = if let Some(data) = p::str(v, "data") {
         let bytes = super::insert::base64_decode(data).ok_or_else(|| CmdError::Params("bad base64".into()))?;
@@ -253,7 +274,13 @@ fn open(s: &mut Session, v: &Value) -> CmdResult {
     {
         doc.styles.default_chr.lang = Some(lang.clone());
     }
-    s.set_document(doc);
+    match s.used_because() {
+        None => s.set_document(doc),
+        Some(why) => {
+            log::info!("file.open: opened beside document {}, not in its place: {why}", s.document_id());
+            s.add_opened_document(doc);
+        }
+    }
     if let Some(z) = s.doc.settings.zoom {
         super::view::restore_zoom(s, z);
     }
@@ -269,12 +296,29 @@ fn open(s: &mut Session, v: &Value) -> CmdResult {
     if encrypted {
         s.password = password.map(crate::io::Password::new);
     }
-    let mut result = json!({"path": path, "paragraphs": s.doc.paragraph_count(), "words": s.doc.word_count(), "encrypted": encrypted});
+    let mut result = json!({"path": path, "paragraphs": s.doc.paragraph_count(), "words": s.doc.word_count(), "encrypted": encrypted, "alreadyOpen": false, "id": s.document_id()});
     if let Some(summary) = pdf {
-        s.ui_requests.push(json!({"open": "pdfImportReport", "warnings": summary.warnings}));
+        s.push_ui_request(json!({"open": "pdfImportReport", "warnings": summary.warnings}));
         result["import"] = json!({"format": "pdf", "pages": summary.pages, "textCharacters": summary.text_characters, "images": summary.images, "warnings": summary.warnings, "saveAsRequired": true});
     }
     Ok(result)
+}
+
+/// Close a document with no window to ask about it (agents, headless sessions).
+fn close_document(s: &mut Session, v: &Value) -> CmdResult {
+    let id = match v.get("id").filter(|x| !x.is_null()) {
+        None => s.document_id(),
+        Some(x) => x.as_u64().ok_or_else(|| CmdError::Params("`id` must be an open document's id".into()))?,
+    };
+    if !s.is_open(id) {
+        return Err(CmdError::Params(format!("no open document has id {id}")));
+    }
+    let dirty = s.documents().iter().any(|d| d.id == id && d.dirty);
+    if dirty && p::bool(v, "force") != Some(true) {
+        return Err(CmdError::Failed("the document has unsaved changes: save it first, or pass \"force\": true to discard them".into()));
+    }
+    s.close_document(id)?;
+    Ok(json!({"closed": id, "active": s.document_id(), "documents": s.documents()}))
 }
 
 /// File › Info › Protect Document › Encrypt with Password: the password Word documents are saved

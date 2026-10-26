@@ -140,7 +140,9 @@ pub(crate) fn list(ui: &mut Ui, id: &str, size: egui::Vec2, rows: &[(String, Str
             ui.centered_and_justified(|ui| ui.label(egui::RichText::new(tl!("(none)")).weak()));
             return;
         }
-        let row_h = ui.text_style_height(&egui::TextStyle::Body) + 4.0;
+        // Virtual rows must include the button's padding and minimum interaction height;
+        // otherwise the last row can extend beyond the scroll area's declared content height.
+        let row_h = (ui.text_style_height(&egui::TextStyle::Button) + 2.0 * ui.spacing().button_padding.y).max(ui.spacing().interact_size.y);
         // Bring the selected row into view when the selection (or the list) changes, so the row
         // an action targets is never off-screen; scrolling by hand doesn't change the selection.
         let seen = ui.make_persistent_id(("scrolled_to", id));
@@ -467,6 +469,7 @@ mod tests {
                     delta: egui::vec2(0.0, dy),
                     phase: egui::TouchPhase::Move,
                     modifiers: Default::default(),
+                    source: egui::MouseWheelSource::Unknown,
                 });
                 h.step();
             }

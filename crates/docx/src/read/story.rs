@@ -2298,7 +2298,7 @@ fn css_string(v: &str) -> String {
                 out.push(d);
             }
             // One whitespace after the escape is its terminator, not part of the value.
-            if chars.clone().next().is_some_and(|w| w.is_whitespace()) {
+            if chars.clone().next().is_some_and(char::is_whitespace) {
                 chars.next();
             }
         }

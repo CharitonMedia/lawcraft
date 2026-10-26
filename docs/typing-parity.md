@@ -1,6 +1,6 @@
 # Typing parity with Word
 
-> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-10-25 · **Change:** trivial (`*Bold* and _italic_ as real formatting` in AutoFormat As You Type; previously trivial: highlight target includes selected paragraph marks, #4085; previously trivial: full-target highlight check beyond 10,000 runs, #4085; previously trivial: AutoCorrect finds the word after a no-break space or an ideographic space; previously trivial: a command that changes nothing is not an edit: no undo step, no unsaved changes, no relayout, and the redo stack survives it; previously trivial: while an input method composes, the caret and its candidate window sit at the input method's cursor inside the composition; previously trivial: Ctrl+Tab types a tab in a table cell, #3137; previously trivial: List AutoFormat triggers in front of an already-written paragraph, not only a fresh empty one, checked in Word for Windows, #3352; previously trivial: AltGr types its characters without opening KeyTips on Linux, #2388; previously trivial: Delete on whole selected cells leaves one empty paragraph in each, with the cell's last paragraph's formatting; nested tables go too, #2802; previously trivial: Bullets and Numbering toggle off style-inherited lists at their effective level, including basedOn chains and numbered ListParagraph styles; other paragraphs and list definitions stay unchanged (related to #3459); previously trivial: a text box that keeps the keyboard no longer resets the input method every frame, #2986; previously trivial: a slash opening a word travels whole to the next line, #2963; previously trivial: typing over a selection takes the first selected character's formatting, also when the selection was made right to left, #2879; previously trivial: Turkish and Azerbaijani case mapping in AutoCorrect, #1923; previously trivial: smart quotes in Hebrew pinned: logical order, ” in acronyms as in Word, #1670; previously trivial: Backspace on a selected table, rows or columns deletes them, Delete clears them, #1844; previously trivial: typed text takes its direction from its own letters, #1543; previously trivial: an input method's request to erase text around the caret is honoured, so web typing in Cyrillic and other non-Latin text no longer repeats, #1480; previously trivial: `-->` AutoCorrect replacement, #2223; previously trivial: a heading-list preset keeps Heading styles and makes other paragraphs Heading 1, as in Word, #1793; previously trivial: numbered headings: a heading-linked Multilevel List numbers new headings by their style; numbering keeps a heading a heading, #1793; previously trivial: reversing an automatic capital adds an exception, #1857; previously trivial: smart quotes open after guillemets and low quotes and nest; previously trivial: Enter on an empty list item numbered by its paragraph style moves it up a level, #2143; previously trivial: Backspace after a section break and Delete before it remove the break, also on the last paragraph, #2127; previously trivial: a table inserted in right-to-left text is right to left, so Tab moves left, #2634; previously trivial: Shift+Delete cuts the selection on every platform, #1669; previously trivial: Select All then Delete removes a table the document starts with, #1198; previously trivial: Alt+numpad character codes, #961; previously trivial: Down and Up from a line start beside a table go into it, #1007; previously trivial: sample-text formulas on Enter, #1067; previously trivial: Track Changes: Accept All after a tracked delete from a paragraph end keeps the next paragraph; Reject All after typing into an empty paragraph keeps it (#864); previously minor: Correct TWo INitial CApitals, cAPS LOCK and table-cell capitals, #544; previously trivial: complex-script caret and Backspace, #604; Move Paragraph Up/Down, Promote/Demote, Go Back and Alt+X keys, #343) · **Target:** Microsoft Word (Microsoft 365) for Mac 16.113.4
+> **Last reviewed:** 2026-10-11 · **Last updated:** 2026-10-25 · **Change:** trivial (`*Bold* and _italic_ as real formatting` in AutoFormat As You Type; previously trivial: highlight target includes selected paragraph marks, #4085; previously trivial: full-target highlight check beyond 10,000 runs, #4085; previously trivial: queued IME replacements are rejected before mutation after their marked composition loses its body/equation target; previously trivial: the transactional equation delete proves its commit with the engine revision; previously trivial: a refused byte-counted equation deletion drops only the immediately adjacent stale replacement, so a later direct commit still applies; previously trivial: a tracked own-insertion shifts the rest of a two-sided IME deletion; previously trivial: AutoCorrect/AutoFormat classification compares the actual paragraph; previously trivial: a replaced body starts a new input-method context and interrupts the composition; a quote the engine leaves as typed is the input method's own change; equation `DeleteSurrounding` erases counted characters; previously trivial: AutoCorrect finds the word after a no-break space or an ideographic space; previously trivial: a command that changes nothing is not an edit: no undo step, no unsaved changes, no relayout, and the redo stack survives it; previously trivial: while an input method composes, the caret and its candidate window sit at the input method's cursor inside the composition; previously trivial: Ctrl+Tab types a tab in a table cell, #3137; previously trivial: List AutoFormat triggers in front of an already-written paragraph, not only a fresh empty one, checked in Word for Windows, #3352; previously trivial: AltGr types its characters without opening KeyTips on Linux, #2388; previously trivial: Delete on whole selected cells leaves one empty paragraph in each, with the cell's last paragraph's formatting; nested tables go too, #2802; previously trivial: Bullets and Numbering toggle off style-inherited lists at their effective level, including basedOn chains and numbered ListParagraph styles; other paragraphs and list definitions stay unchanged (related to #3459); previously trivial: a text box that keeps the keyboard no longer resets the input method every frame, #2986; previously trivial: a slash opening a word travels whole to the next line, #2963; previously trivial: typing over a selection takes the first selected character's formatting, also when the selection was made right to left, #2879; previously trivial: Turkish and Azerbaijani case mapping in AutoCorrect, #1923; previously trivial: smart quotes in Hebrew pinned: logical order, ” in acronyms as in Word, #1670; previously trivial: Backspace on a selected table, rows or columns deletes them, Delete clears them, #1844; previously trivial: typed text takes its direction from its own letters, #1543; previously trivial: an input method's request to erase text around the caret is honoured, so web typing in Cyrillic and other non-Latin text no longer repeats, #1480; previously trivial: `-->` AutoCorrect replacement, #2223; previously trivial: a heading-list preset keeps Heading styles and makes other paragraphs Heading 1, as in Word, #1793; previously trivial: numbered headings: a heading-linked Multilevel List numbers new headings by their style; numbering keeps a heading a heading, #1793; previously trivial: reversing an automatic capital adds an exception, #1857; previously trivial: smart quotes open after guillemets and low quotes and nest; previously trivial: Enter on an empty list item numbered by its paragraph style moves it up a level, #2143; previously trivial: Backspace after a section break and Delete before it remove the break, also on the last paragraph, #2127; previously trivial: a table inserted in right-to-left text is right to left, so Tab moves left, #2634; previously trivial: Shift+Delete cuts the selection on every platform, #1669; previously trivial: Select All then Delete removes a table the document starts with, #1198; previously trivial: Alt+numpad character codes, #961; previously trivial: Down and Up from a line start beside a table go into it, #1007; previously trivial: sample-text formulas on Enter, #1067; previously trivial: Track Changes: Accept All after a tracked delete from a paragraph end keeps the next paragraph; Reject All after typing into an empty paragraph keeps it (#864); previously minor: Correct TWo INitial CApitals, cAPS LOCK and table-cell capitals, #544; previously trivial: complex-script caret and Backspace, #604; Move Paragraph Up/Down, Promote/Demote, Go Back and Alt+X keys, #343; the body IME deletion maps signed placeholder growth/shrink, keeps control markers outside the range and scopes its undo join to the matching replacement) · **Target:** Microsoft Word (Microsoft 365) for Mac 16.113.4
 
 What Word does when you type, observed black-box (same keystrokes typed into Word and
 WordCraft, results read back paragraph by paragraph) and pinned by tests in
@@ -370,8 +370,8 @@ again.
 - An input method can ask to erase characters before and after the caret (`DeleteSurrounding`)
   and send replacement text. The web build's hidden text field does this whenever its contents
   change other than by adding to the end: Backspace and corrections from phone keyboards, and
-  the Chrome caret jump below. The desktop builds never receive it (egui-winit 0.36 doesn't
-  send it). WordCraft erases those characters as Backspace erases a selection, stopping at the
+  the Chrome caret jump below. The 0.37 desktop bridge can also deliver character- or
+  byte-counted surrounding deletions from the input method. WordCraft erases those characters as Backspace erases a selection, stopping at the
   paragraph's ends, then types the new text. The new text keeps the erased text's formatting
   and never overtypes what follows. Erasing and retyping stay in the open typing undo step, and
   typing after them joins it too (#1480,
@@ -394,6 +394,74 @@ again.
   and the caret and the candidate window sit at the input method's cursor inside it: the end of
   the range it reports, or the end of the marked text when it reports none. The range is clamped
   to the text (`canvas::tests::the_caret_follows_the_input_method_cursor_in_the_composition`).
+- A composition belongs to the text it was started on. When a command replaces the body under
+  the same document id — Replace Document Text, a version restore, Compare, Undo/Redo — or opens
+  a new document, the body's replacement epoch advances, the platform clears the composition, and
+  any marked text is dropped. Replacing the text with an identical one still starts a new
+  context (`canvas::tests::ime_generation_changes_on_body_replacement_with_the_same_text`,
+  `ime_generation_changes_on_undo_and_version_restore`,
+  `keys::tests::observe_ime_drops_a_preedit_without_focus`). Undo/Redo also gives the equation
+  being edited a fresh session token, so its context follows the restored tree. The marked text
+  is never painted without focus.
+- If replacing the body or changing the edited equation invalidates nonempty marked text,
+  the next canvas input batch rejects that composition's queued surrounding deletions and one
+  replacement commit before any engine mutation. An associated `Text` fallback is rejected too.
+  A fresh nonempty preedit or ordinary typing ends that batch's suppression; without an old
+  marked composition, direct commits remain eligible. A later commit after the rejected one,
+  or in a later canvas batch, is also fresh input. New regression checks cover identical-body
+  replacement, both deletion units, equation exit before or within the batch, unchanged text
+  and Undo history, and fresh input (`keys::tests::ime_interrupted_body_preedit_drops_queued_replacement_before_mutation`,
+  `ime_interrupted_equation_preedit_drops_queued_body_replacement`,
+  `ime_interrupted_preedit_does_not_suppress_fresh_input`). Their managed validation is pending;
+  this does not claim native input-method acceptance or identify untagged events across frames.
+- An accepted IME commit earns an `InputMethod` receipt only when the engine inserted exactly the
+  committed text. A single quote the engine leaves as typed (smart quotes off) is the input
+  method's own change; a smart quote or AutoCorrect replacement is `Other`
+  (`ime_apostrophe_with_smart_quotes_off_is_an_input_method_change`,
+  `ime_apostrophe_with_smart_quotes_on_stays_other`,
+  `ime_literal_commit_after_autoformat_is_input_method`). A `DeleteSurrounding` whose two sides
+  cannot both be applied is rolled back whole and publishes no receipt
+  (`a_refused_second_delete_surrounding_rolls_the_request_back`); every such refusal also
+  interrupts the composition and clears the painted pre-edit and both replacement joins because
+  the platform's hidden text already changed
+  (`a_refused_body_delete_clears_preedit_and_joins`). Under Track Changes, deleting text this
+  author inserted shortens the stored paragraph, so the following range and caret are shifted by
+  the bytes actually removed (`tracked_delete_surrounding_shifts_past_its_own_insertion`,
+  `tracked_own_insertion_then_a_refused_side_rolls_the_whole_request_back`). Emptying a content
+  control restores its placeholder, which may make the paragraph longer; a body deletion maps the
+  following range and caret by the signed stored-length change, and refuses the whole transaction
+  when growth cannot be proven to come from a placeholder restored at or before the erased range
+  (`delete_surrounding_maps_after_text_and_caret_past_a_growing_placeholder`,
+  `delete_surrounding_maps_a_shrinking_placeholder_and_after_text`,
+  `delete_surrounding_maps_a_placeholder_restored_by_the_after_side`). Control markers are
+  zero-length visible objects, so a range start maps after the start marker and after the end
+  marker: an ordinary IME deletion never breaks a control
+  (`ime_text::tests::control_markers_are_not_included_in_delete_ranges`). The replacement's undo
+  join is scoped to the next `text.insert` at the selection the deletion left; an intervening
+  command owns its own step (`body_delete_join_does_not_leak_to_an_intervening_command`).
+- Inside an equation, `DeleteSurrounding` erases the counted characters with the equation's own
+  transactional command (at most 64 units a side), refusing the whole request if any step cannot
+  delete — including a step that would only move the caret into another argument
+  (`equation_delete_surrounding_refuses_a_mixed_caret_only_step`); the delete and the following
+  commit are one undo group. Byte counts have no reversible mapping into the
+  structured tree, so the whole request is refused, the composition is interrupted and the
+  replacement the platform sends for that rejected deletion — the immediately adjacent `Commit`,
+  or an adjacent `Text` + `Commit` pair — is dropped instead of being inserted beside the
+  untouched equation (the pre-edit never lives in the model). Any later `Text`/`Commit` in the
+  same raw-input batch is fresh input and applies, as is a later direct commit without a pre-edit;
+  no persistent tombstone can swallow it. An over-cap request clears the painted pre-edit and any
+  earlier deletion's replacement join before refusing. The equation's surroundings stay explicitly
+  unavailable (`ime_equation_delete_is_one_input_method_change`,
+  `ime_equation_delete_and_commit_are_one_undo_step`,
+  `ime_equation_byte_delete_drops_only_its_immediate_replacement`,
+  `over_cap_equation_delete_clears_the_painted_preedit`,
+  `over_cap_equation_delete_clears_the_previous_replacement_join`). The engine's checked revision
+  on the unavailable stamp proves a successful content change; a refusal, an automatic rewrite or
+  an exhausted revision publishes no receipt (`ime_transformed_equation_commits_are_other`,
+  `exhausted_ime_revisions_never_certify_equation_or_wide_body_edits`).
+- Pre-edit and commit sizes are bounded (the visible window at 4000 bytes, a pre-edit at the same
+  cap, a commit at 64 KiB): larger hostile events are ignored rather than painted or inserted
+  (`oversized_ime_events_are_ignored`).
 
 ## Known gaps
 
@@ -424,11 +492,13 @@ again.
 
 | Date | Change | Summary |
 |---|---|---|
-| 2026-10-24 | trivial | AutoCorrect: a word typed after a no-break space or an ideographic space is corrected as after a plain space |
 | 2026-10-25 | trivial | Highlight decisions include fully selected paragraph marks in whole cells and ordinary ranges, including empty paragraphs; partial text columns exclude unselected marks (#4085). |
 | 2026-10-25 | trivial | Highlight toggle checks the full target beyond 10,000 runs without collecting resolved formatting; mixed and inherited tails and Undo/Redo covered (#4085). |
+| 2026-10-24 | trivial | Input methods: reject queued old-composition replacements before mutation after body/equation target replacement (new regression validation pending); equation `DeleteSurrounding` is one transactional command whose checked revision proves a receipt; a caret-only step in a mixed request refuses the whole deletion, and an over-cap request clears the painted pre-edit and the previous replacement join; a refused byte-counted equation deletion drops only the immediately adjacent stale replacement, never a later direct commit; a tracked own-insertion shifts the following range; a body deletion maps signed placeholder growth/shrink, keeps control markers outside the range and scopes its replacement undo join to the matching `text.insert`; refusals clear the painted pre-edit and joins; AutoCorrect/AutoFormat classification compares the paragraph as typed; equation replacement interrupts the composition |
+| 2026-10-24 | trivial | AutoCorrect: a word typed after a no-break space or an ideographic space is corrected as after a plain space |
 | 2026-10-24 | trivial | Highlight shortcut toggles the last chosen colour off when the whole selection has it; explicit colour commands remain setters (#4085). |
 | 2026-10-24 | trivial | AutoFormat As You Type: `*Bold* and _italic_ as real formatting` turns `*word*` bold and `_word_` italic without the marks; off by default |
+| 2026-10-23 | trivial | Input methods: a replaced body (Replace Document Text, version restore, Compare, Undo/Redo) starts a new context and interrupts the composition; smart quotes off keeps an IME quote an `InputMethod` change; equation `DeleteSurrounding` erases counted characters; bounded pre-edit/commit sizes; a partly refused two-sided deletion is rolled back |
 | 2026-10-22 | trivial | Input methods: while composing, the caret and the candidate window follow the input method's cursor inside the marked text |
 | 2026-10-21 | trivial | Bullets and Numbering toggle off style-inherited lists at their effective level, including basedOn chains and numbered ListParagraph styles; other paragraphs and list definitions stay unchanged (related to #3459) |
 | 2026-10-21 | trivial | List AutoFormat (`- `, `1. `, …) triggers at the start of an already-written paragraph, not only a fresh empty one; checked in Word for Windows (#3352) |

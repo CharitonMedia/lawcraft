@@ -435,6 +435,11 @@ fn autocorrect_options(s: &mut Session, v: &Value) -> CmdResult {
     }))
 }
 
+/// Builds the tools, review, file and insertion command table: Repeat and macros; AutoCorrect,
+/// keyboard and ribbon customization and search; Compare, accessibility, inspection, protection,
+/// versions, recovery, templates and autosave; compatibility, sharing, Quick Parts, fields,
+/// signatures, objects and spreadsheets; header/footer, table and numbering settings; language,
+/// markup, editor and selection commands; and design and view options.
 pub fn specs() -> Vec<CommandSpec> {
     vec![
         CommandSpec::new("edit.repeat", "Repeat", "Quick Access Toolbar", |s, _| {
@@ -527,6 +532,10 @@ pub fn specs() -> Vec<CommandSpec> {
                 s.doc.settings.protection = protection;
                 s.doc.settings.protect_hash = protect_hash;
                 s.doc.settings.protect_formatting = protect_formatting;
+                // The restored document reuses the open document's id; the body and any equation
+                // editing session are replaced.
+                s.note_body_replaced();
+                s.math = None;
                 s.touch();
                 s.clamp_selection();
             }
@@ -542,8 +551,7 @@ pub fn specs() -> Vec<CommandSpec> {
             let mut doc = crate::io::open_path(std::path::Path::new(path)).map_err(CmdError::Failed)?;
             // As in Word, the new document is attached to the template it came from (#2852).
             doc.settings.attached_template = Some(path.to_string());
-            s.set_document(doc);
-            s.path = None;
+            s.add_document(doc);
             s.dirty = true;
             sel_result(s)
         })
@@ -1349,6 +1357,8 @@ fn compare(s: &mut Session, v: &Value) -> CmdResult {
         let doc = crate::io::open_path(std::path::Path::new(path)).map_err(CmdError::Failed)?;
         s.doc = doc;
         s.doc.ensure_nonempty();
+        s.note_body_replaced();
+        s.math = None;
     }
     let level = p::str(v, "level").unwrap_or("word");
     let opts = CompareOptions {
@@ -1430,6 +1440,8 @@ fn compare(s: &mut Session, v: &Value) -> CmdResult {
     }
     s.doc.body = out;
     s.doc.ensure_nonempty();
+    s.note_body_replaced();
+    s.math = None;
     if show_in != "original" || p::str(v, "original").is_some() {
         // The result is a new, untitled document: saving it never overwrites either file.
         s.path = None;
@@ -1552,12 +1564,13 @@ const NOISE_MATCH_LEN: usize = 1;
 /// stripped before running its table, so it's left untouched regardless of length; only a short
 /// match produced by the table's own backtracking, which can only ever be interior, is a
 /// candidate.
+#[derive(Clone, Copy, PartialEq)]
+enum Kind {
+    Keep,
+    Fold,
+}
+
 fn collapse_noise_matches(ops: &[Op]) -> Vec<Op> {
-    #[derive(Clone, Copy, PartialEq)]
-    enum Kind {
-        Keep,
-        Fold,
-    }
     let mut runs: Vec<(Op, usize, Kind)> = Vec::new();
     let mut k = 0;
     while k < ops.len() {
@@ -1584,12 +1597,7 @@ fn collapse_noise_matches(ops: &[Op]) -> Vec<Op> {
         }
         let region = &runs[start..i];
         if region.iter().any(|(_, _, kind)| *kind == Kind::Fold) {
-            // Flatten the region: every original character first (in its own order), then every
-            // revised character (in its own order) — one clean delete, one clean insert.
-            let dels: usize = region.iter().map(|(op, len, kind)| if *kind == Kind::Fold || *op == Op::Del { *len } else { 0 }).sum();
-            let inss: usize = region.iter().map(|(op, len, kind)| if *kind == Kind::Fold || *op == Op::Ins { *len } else { 0 }).sum();
-            out.extend(std::iter::repeat_n(Op::Del, dels));
-            out.extend(std::iter::repeat_n(Op::Ins, inss));
+            flatten_region(&mut out, region);
         } else {
             for (op, len, _) in region {
                 out.extend(std::iter::repeat_n(*op, *len));
@@ -1597,6 +1605,15 @@ fn collapse_noise_matches(ops: &[Op]) -> Vec<Op> {
         }
     }
     out
+}
+
+/// Flattens a region with a folded run: every original character first (in its own order), then
+/// every revised character (in its own order) — one clean delete, one clean insert.
+fn flatten_region(out: &mut Vec<Op>, region: &[(Op, usize, Kind)]) {
+    let dels: usize = region.iter().map(|(op, len, kind)| if *kind == Kind::Fold || *op == Op::Del { *len } else { 0 }).sum();
+    let inss: usize = region.iter().map(|(op, len, kind)| if *kind == Kind::Fold || *op == Op::Ins { *len } else { 0 }).sum();
+    out.extend(std::iter::repeat_n(Op::Del, dels));
+    out.extend(std::iter::repeat_n(Op::Ins, inss));
 }
 
 /// Words with the spaces after them ("The ", "cat "), or single characters.

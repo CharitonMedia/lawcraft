@@ -24,4 +24,3 @@ wordcraft-law = { workspace = true }
 wordcraft-control-key = { workspace = true }
 serde_json = { workspace = true }
 sys-locale = "0.3"
-ureq = "3.4"

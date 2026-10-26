@@ -8,6 +8,8 @@ Generated-in-code art is original and has no file to list: the UI icon set (`cra
 
 | Asset | Author | Source | Licence | Notes |
 |---|---|---|---|---|
+| `egui` dependency: `epaint_default_fonts/fonts/egui-icons.ttf` | John Slegers (emoji-icon-font) | https://github.com/storytold/egui/blob/173cc7375d35dc5fbc5b5d0994fdf787f547c5d1/crates/epaint_default_fonts/fonts/egui-icons.txt; original https://github.com/jslegers/emoji-icon-font | MIT (full copyright and permission text in NOTICE) | Small egui special-icon subset; embedded by default_fonts, retained in FontDefinitions::default() |
+| `egui` dependency: `epaint_default_fonts/fonts/emoji-icon-font.ttf` | John Slegers | https://github.com/storytold/egui/blob/173cc7375d35dc5fbc5b5d0994fdf787f547c5d1/crates/epaint_default_fonts/fonts/emoji-icon-font-mit-license.txt; original https://github.com/jslegers/emoji-icon-font | MIT (full copyright and permission text in NOTICE) | Parent monochrome icon/emoji face embedded by monochrome_emoji_fonts; separate from the egui-icons subset |
 | `assets/hyphenation/en-us.pat` | DesignCraft contributors (generated) | trained from the Moby list by DesignCraft's patgen | Public Domain (CC0-1.0) | Our own Liang hyphenation patterns (no TeX patterns) |
 | `assets/hyphenation/en-us.dic` | Grady Ward (Moby Hyphenator II word list); converted by DesignCraft contributors | https://www.gutenberg.org/ebooks/3204 (file `mhyph.txt`, SHA-256 `eeb30474c86b8af3469035ec1a0913e35905325ca885290db9dfed9881e230ac`), via DesignCraft | Public Domain | ~165k words with break points; drives spelling and hyphenation |
 | `assets/spelling/en-extra.txt` | WordCraft contributors | original word list written for this repository (common modern words the Moby list lacks); no other dictionary copied | MIT OR Apache-2.0 | ~240 lowercase English base forms supplementing spelling (#520), including British spellings (#40) |
@@ -69,9 +71,6 @@ Generated-in-code art is original and has no file to list: the UI icon set (`cra
 | `docs/brand/artcraft-mark.svg` | ArtCraft Team | craftrules `assets/brand/` | ArtCraft trademark, `docs/brand/LICENSE-brand.txt` | Not open source; usable unmodified only |
 | craft-fonts (optional build input, not files in this repo): BIZ UDPGothic, BIZ UDMincho, Shippori Mincho, Noto Sans CJK SC, Noto Sans Arabic | see https://github.com/storytold/craft-fonts/blob/main/ATTRIBUTION.md | embedded only when built with `CRAFT_FONTS_DIR` (all official releases) | OFL-1.1 | Japanese and Chinese UI, Japanese document fallback |
 | craft-i18n (optional build input, not files in this repo): the interface translations | see https://github.com/storytold/craft-i18n/blob/main/ATTRIBUTION.md, which credits every translator of WordCraft's former in-repo catalogs (`crates/ui-egui/src/i18n/*.tsv`, migrated at `wordcraft@806a945`) | embedded only when built with `CRAFT_I18N_DIR`, at the commit in `craft-i18n.rev` (all official releases) | MIT OR Apache-2.0 | Interface languages other than English; clean-room translations from the English interface labels |
-
-
-
 
 ## PDF import dependencies
 

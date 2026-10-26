@@ -5,23 +5,36 @@
   Built by package.ps1:
 
     wix build wordcraft.wxs -arch x64 -ext WixToolset.UI.wixext -ext WixToolset.Util.wixext
-      -d Version=1.2.3 -d BinDir=... -d IconPath=... -d LicenseRtf=... -o out.msi
+      -d Version=1.2.3 -d BinDir=... -d IconPath=... -d LicenseRtf=... [-d Scope=perUserOrMachine] -o out.msi
 
   Per-machine install into Program Files with a Start Menu shortcut. The installer shows the
   standard WiX dialogs: welcome + license, progress, and a finish page.
+
+  Built a second time with -d Scope=perUserOrMachine for people without administrator rights
+  (#39): a dual-purpose package that WiX gives ALLUSERS=2 and MSIINSTALLPERUSER=1, so it installs
+  for the current user with no UAC prompt. Windows then redirects Program Files to
+  %LOCALAPPDATA%\Programs, the Start Menu to the user's own, and HKMU to HKCU, so the same
+  components work in both packages. Both share the UpgradeCode: each upgrades its own earlier
+  versions (Windows Installer only matches products installed in the same context).
 
   UpgradeCode and the component GUIDs below belong to LawCraft alone. Never copy them from (or
   into) a sibling Craft app: Windows Installer treats every package sharing an UpgradeCode as one
   product, so a shared code makes one app's installer refuse to install ("a newer version is
   already installed") or silently uninstall the other. packaging-lint.yml checks this.
 -->
+<?ifndef Scope?>
+<?define Scope = perMachine?>
+<?endif?>
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs" xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
+  <?ifndef HasCraftFontLicences ?>
+  <?define HasCraftFontLicences=0 ?>
+  <?endif ?>
   <Package
       Name="LawCraft"
       Manufacturer="Chariton Media"
       Version="$(var.Version)"
       UpgradeCode="49B4DDBE-1EBA-4281-B3A3-02CF0C5F2D21"
-      Scope="perMachine"
+      Scope="$(var.Scope)"
       Compressed="yes"
       Language="1033">
     <SummaryInformation Description="LawCraft word processor" Manufacturer="Chariton Media" />
@@ -60,11 +73,23 @@
     <StandardDirectory Id="ProgramMenuFolder" />
 
     <Feature Id="Main" Title="LawCraft" Level="1">
+      <ComponentGroupRef Id="AppNotices" />
+      <?if $(var.HasCraftFontLicences) = 1 ?>
+      <ComponentGroupRef Id="CraftFontLicences" />
+      <?endif ?>
       <ComponentGroupRef Id="WordcraftFiles" />
     </Feature>
   </Package>
 
   <Fragment>
+    <ComponentGroup Id="AppNotices" Directory="INSTALLFOLDER">
+      <Files Include="$(var.AppNoticesDir)\**" />
+    </ComponentGroup>
+    <?if $(var.HasCraftFontLicences) = 1 ?>
+    <ComponentGroup Id="CraftFontLicences" Directory="INSTALLFOLDER">
+      <Files Include="$(var.DocsDir)\**" />
+    </ComponentGroup>
+    <?endif ?>
     <ComponentGroup Id="WordcraftFiles" Directory="INSTALLFOLDER">
       <Component Id="WordcraftApp" Guid="F7FDE0B5-B388-4F16-9D8C-FA1FE990F0C0">
         <File Id="WordcraftExe" Source="$(var.BinDir)\lawcraft.exe" KeyPath="yes">
@@ -73,7 +98,7 @@
               Icon="WordcraftIcon.ico" IconIndex="0" />
         </File>
 
-        <RegistryValue Root="HKLM" Key="Software\Microsoft\Windows\CurrentVersion\App Paths\lawcraft.exe" Value="[#WordcraftExe]" Type="string" />
+        <RegistryValue Root="HKMU" Key="Software\Microsoft\Windows\CurrentVersion\App Paths\lawcraft.exe" Value="[#WordcraftExe]" Type="string" />
       </Component>
 
       <!-- File associations (#295). Each document type gets a LawCraft ProgId (name, icon, open
@@ -84,70 +109,70 @@
            extension's default: the installer never takes over .docx from another app. Markdown and
            plain text are only "Open with" candidates. Removed again on uninstall. -->
       <Component Id="WordcraftFileTypes" Guid="D085DA45-C01C-4683-838C-97CB6CB235AF">
-        <RegistryValue Root="HKLM" Key="Software\RegisteredApplications" Name="LawCraft" Value="Software\LawCraft\Capabilities" Type="string" KeyPath="yes" />
-        <RegistryValue Root="HKLM" Key="Software\LawCraft\Capabilities" Name="ApplicationName" Value="LawCraft" Type="string" />
-        <RegistryValue Root="HKLM" Key="Software\LawCraft\Capabilities" Name="ApplicationDescription" Value="Write and design documents; open and save Word files." Type="string" />
-        <RegistryValue Root="HKLM" Key="Software\LawCraft\Capabilities" Name="ApplicationIcon" Value="&quot;[#WordcraftExe]&quot;,0" Type="string" />
-        <RegistryValue Root="HKLM" Key="Software\Classes\Applications\lawcraft.exe" Name="FriendlyAppName" Value="LawCraft" Type="string" />
-        <RegistryValue Root="HKLM" Key="Software\Classes\Applications\lawcraft.exe\shell\open\command" Value="&quot;[#WordcraftExe]&quot; &quot;%1&quot;" Type="string" />
+        <RegistryValue Root="HKMU" Key="Software\RegisteredApplications" Name="LawCraft" Value="Software\LawCraft\Capabilities" Type="string" KeyPath="yes" />
+        <RegistryValue Root="HKMU" Key="Software\LawCraft\Capabilities" Name="ApplicationName" Value="LawCraft" Type="string" />
+        <RegistryValue Root="HKMU" Key="Software\LawCraft\Capabilities" Name="ApplicationDescription" Value="Write and design documents; open and save Word files." Type="string" />
+        <RegistryValue Root="HKMU" Key="Software\LawCraft\Capabilities" Name="ApplicationIcon" Value="&quot;[#WordcraftExe]&quot;,0" Type="string" />
+        <RegistryValue Root="HKMU" Key="Software\Classes\Applications\lawcraft.exe" Name="FriendlyAppName" Value="LawCraft" Type="string" />
+        <RegistryValue Root="HKMU" Key="Software\Classes\Applications\lawcraft.exe\shell\open\command" Value="&quot;[#WordcraftExe]&quot; &quot;%1&quot;" Type="string" />
 
         <ProgId Id="LawCraft.Document" Description="Word Document" Icon="WordcraftExe" IconIndex="0" />
-        <RegistryValue Root="HKLM" Key="Software\Classes\LawCraft.Document\shell\open\command" Value="&quot;[#WordcraftExe]&quot; &quot;%1&quot;" Type="string" />
-        <RegistryValue Root="HKLM" Key="Software\Classes\.docx\OpenWithProgids" Name="LawCraft.Document" Value="" Type="string" />
-        <RegistryValue Root="HKLM" Key="Software\Classes\Applications\lawcraft.exe\SupportedTypes" Name=".docx" Value="" Type="string" />
-        <RegistryValue Root="HKLM" Key="Software\LawCraft\Capabilities\FileAssociations" Name=".docx" Value="LawCraft.Document" Type="string" />
+        <RegistryValue Root="HKMU" Key="Software\Classes\LawCraft.Document\shell\open\command" Value="&quot;[#WordcraftExe]&quot; &quot;%1&quot;" Type="string" />
+        <RegistryValue Root="HKMU" Key="Software\Classes\.docx\OpenWithProgids" Name="LawCraft.Document" Value="" Type="string" />
+        <RegistryValue Root="HKMU" Key="Software\Classes\Applications\lawcraft.exe\SupportedTypes" Name=".docx" Value="" Type="string" />
+        <RegistryValue Root="HKMU" Key="Software\LawCraft\Capabilities\FileAssociations" Name=".docx" Value="LawCraft.Document" Type="string" />
 
         <ProgId Id="LawCraft.DocumentMacroEnabled" Description="Word Macro-Enabled Document" Icon="WordcraftExe" IconIndex="0" />
-        <RegistryValue Root="HKLM" Key="Software\Classes\LawCraft.DocumentMacroEnabled\shell\open\command" Value="&quot;[#WordcraftExe]&quot; &quot;%1&quot;" Type="string" />
-        <RegistryValue Root="HKLM" Key="Software\Classes\.docm\OpenWithProgids" Name="LawCraft.DocumentMacroEnabled" Value="" Type="string" />
-        <RegistryValue Root="HKLM" Key="Software\Classes\Applications\lawcraft.exe\SupportedTypes" Name=".docm" Value="" Type="string" />
-        <RegistryValue Root="HKLM" Key="Software\LawCraft\Capabilities\FileAssociations" Name=".docm" Value="LawCraft.DocumentMacroEnabled" Type="string" />
+        <RegistryValue Root="HKMU" Key="Software\Classes\LawCraft.DocumentMacroEnabled\shell\open\command" Value="&quot;[#WordcraftExe]&quot; &quot;%1&quot;" Type="string" />
+        <RegistryValue Root="HKMU" Key="Software\Classes\.docm\OpenWithProgids" Name="LawCraft.DocumentMacroEnabled" Value="" Type="string" />
+        <RegistryValue Root="HKMU" Key="Software\Classes\Applications\lawcraft.exe\SupportedTypes" Name=".docm" Value="" Type="string" />
+        <RegistryValue Root="HKMU" Key="Software\LawCraft\Capabilities\FileAssociations" Name=".docm" Value="LawCraft.DocumentMacroEnabled" Type="string" />
 
         <ProgId Id="LawCraft.Template" Description="Word Template" Icon="WordcraftExe" IconIndex="0" />
-        <RegistryValue Root="HKLM" Key="Software\Classes\LawCraft.Template\shell\open\command" Value="&quot;[#WordcraftExe]&quot; &quot;%1&quot;" Type="string" />
-        <RegistryValue Root="HKLM" Key="Software\Classes\.dotx\OpenWithProgids" Name="LawCraft.Template" Value="" Type="string" />
-        <RegistryValue Root="HKLM" Key="Software\Classes\Applications\lawcraft.exe\SupportedTypes" Name=".dotx" Value="" Type="string" />
-        <RegistryValue Root="HKLM" Key="Software\LawCraft\Capabilities\FileAssociations" Name=".dotx" Value="LawCraft.Template" Type="string" />
+        <RegistryValue Root="HKMU" Key="Software\Classes\LawCraft.Template\shell\open\command" Value="&quot;[#WordcraftExe]&quot; &quot;%1&quot;" Type="string" />
+        <RegistryValue Root="HKMU" Key="Software\Classes\.dotx\OpenWithProgids" Name="LawCraft.Template" Value="" Type="string" />
+        <RegistryValue Root="HKMU" Key="Software\Classes\Applications\lawcraft.exe\SupportedTypes" Name=".dotx" Value="" Type="string" />
+        <RegistryValue Root="HKMU" Key="Software\LawCraft\Capabilities\FileAssociations" Name=".dotx" Value="LawCraft.Template" Type="string" />
 
         <ProgId Id="LawCraft.TemplateMacroEnabled" Description="Word Macro-Enabled Template" Icon="WordcraftExe" IconIndex="0" />
-        <RegistryValue Root="HKLM" Key="Software\Classes\LawCraft.TemplateMacroEnabled\shell\open\command" Value="&quot;[#WordcraftExe]&quot; &quot;%1&quot;" Type="string" />
-        <RegistryValue Root="HKLM" Key="Software\Classes\.dotm\OpenWithProgids" Name="LawCraft.TemplateMacroEnabled" Value="" Type="string" />
-        <RegistryValue Root="HKLM" Key="Software\Classes\Applications\lawcraft.exe\SupportedTypes" Name=".dotm" Value="" Type="string" />
-        <RegistryValue Root="HKLM" Key="Software\LawCraft\Capabilities\FileAssociations" Name=".dotm" Value="LawCraft.TemplateMacroEnabled" Type="string" />
+        <RegistryValue Root="HKMU" Key="Software\Classes\LawCraft.TemplateMacroEnabled\shell\open\command" Value="&quot;[#WordcraftExe]&quot; &quot;%1&quot;" Type="string" />
+        <RegistryValue Root="HKMU" Key="Software\Classes\.dotm\OpenWithProgids" Name="LawCraft.TemplateMacroEnabled" Value="" Type="string" />
+        <RegistryValue Root="HKMU" Key="Software\Classes\Applications\lawcraft.exe\SupportedTypes" Name=".dotm" Value="" Type="string" />
+        <RegistryValue Root="HKMU" Key="Software\LawCraft\Capabilities\FileAssociations" Name=".dotm" Value="LawCraft.TemplateMacroEnabled" Type="string" />
 
         <ProgId Id="LawCraft.LegacyDocument" Description="Legacy Word Document" Icon="WordcraftExe" IconIndex="0" />
-        <RegistryValue Root="HKLM" Key="Software\Classes\LawCraft.LegacyDocument\shell\open\command" Value="&quot;[#WordcraftExe]&quot; &quot;%1&quot;" Type="string" />
-        <RegistryValue Root="HKLM" Key="Software\Classes\.doc\OpenWithProgids" Name="LawCraft.LegacyDocument" Value="" Type="string" />
-        <RegistryValue Root="HKLM" Key="Software\Classes\Applications\lawcraft.exe\SupportedTypes" Name=".doc" Value="" Type="string" />
-        <RegistryValue Root="HKLM" Key="Software\LawCraft\Capabilities\FileAssociations" Name=".doc" Value="LawCraft.LegacyDocument" Type="string" />
+        <RegistryValue Root="HKMU" Key="Software\Classes\LawCraft.LegacyDocument\shell\open\command" Value="&quot;[#WordcraftExe]&quot; &quot;%1&quot;" Type="string" />
+        <RegistryValue Root="HKMU" Key="Software\Classes\.doc\OpenWithProgids" Name="LawCraft.LegacyDocument" Value="" Type="string" />
+        <RegistryValue Root="HKMU" Key="Software\Classes\Applications\lawcraft.exe\SupportedTypes" Name=".doc" Value="" Type="string" />
+        <RegistryValue Root="HKMU" Key="Software\LawCraft\Capabilities\FileAssociations" Name=".doc" Value="LawCraft.LegacyDocument" Type="string" />
 
         <ProgId Id="LawCraft.LegacyTemplate" Description="Legacy Word Template" Icon="WordcraftExe" IconIndex="0" />
-        <RegistryValue Root="HKLM" Key="Software\Classes\LawCraft.LegacyTemplate\shell\open\command" Value="&quot;[#WordcraftExe]&quot; &quot;%1&quot;" Type="string" />
-        <RegistryValue Root="HKLM" Key="Software\Classes\.dot\OpenWithProgids" Name="LawCraft.LegacyTemplate" Value="" Type="string" />
-        <RegistryValue Root="HKLM" Key="Software\Classes\Applications\lawcraft.exe\SupportedTypes" Name=".dot" Value="" Type="string" />
-        <RegistryValue Root="HKLM" Key="Software\LawCraft\Capabilities\FileAssociations" Name=".dot" Value="LawCraft.LegacyTemplate" Type="string" />
+        <RegistryValue Root="HKMU" Key="Software\Classes\LawCraft.LegacyTemplate\shell\open\command" Value="&quot;[#WordcraftExe]&quot; &quot;%1&quot;" Type="string" />
+        <RegistryValue Root="HKMU" Key="Software\Classes\.dot\OpenWithProgids" Name="LawCraft.LegacyTemplate" Value="" Type="string" />
+        <RegistryValue Root="HKMU" Key="Software\Classes\Applications\lawcraft.exe\SupportedTypes" Name=".dot" Value="" Type="string" />
+        <RegistryValue Root="HKMU" Key="Software\LawCraft\Capabilities\FileAssociations" Name=".dot" Value="LawCraft.LegacyTemplate" Type="string" />
 
         <ProgId Id="LawCraft.RichText" Description="Rich Text Document" Icon="WordcraftExe" IconIndex="0" />
-        <RegistryValue Root="HKLM" Key="Software\Classes\LawCraft.RichText\shell\open\command" Value="&quot;[#WordcraftExe]&quot; &quot;%1&quot;" Type="string" />
-        <RegistryValue Root="HKLM" Key="Software\Classes\.rtf\OpenWithProgids" Name="LawCraft.RichText" Value="" Type="string" />
-        <RegistryValue Root="HKLM" Key="Software\Classes\Applications\lawcraft.exe\SupportedTypes" Name=".rtf" Value="" Type="string" />
-        <RegistryValue Root="HKLM" Key="Software\LawCraft\Capabilities\FileAssociations" Name=".rtf" Value="LawCraft.RichText" Type="string" />
+        <RegistryValue Root="HKMU" Key="Software\Classes\LawCraft.RichText\shell\open\command" Value="&quot;[#WordcraftExe]&quot; &quot;%1&quot;" Type="string" />
+        <RegistryValue Root="HKMU" Key="Software\Classes\.rtf\OpenWithProgids" Name="LawCraft.RichText" Value="" Type="string" />
+        <RegistryValue Root="HKMU" Key="Software\Classes\Applications\lawcraft.exe\SupportedTypes" Name=".rtf" Value="" Type="string" />
+        <RegistryValue Root="HKMU" Key="Software\LawCraft\Capabilities\FileAssociations" Name=".rtf" Value="LawCraft.RichText" Type="string" />
 
         <ProgId Id="LawCraft.OpenDocumentText" Description="OpenDocument Text" Icon="WordcraftExe" IconIndex="0" />
-        <RegistryValue Root="HKLM" Key="Software\Classes\LawCraft.OpenDocumentText\shell\open\command" Value="&quot;[#WordcraftExe]&quot; &quot;%1&quot;" Type="string" />
-        <RegistryValue Root="HKLM" Key="Software\Classes\.odt\OpenWithProgids" Name="LawCraft.OpenDocumentText" Value="" Type="string" />
-        <RegistryValue Root="HKLM" Key="Software\Classes\Applications\lawcraft.exe\SupportedTypes" Name=".odt" Value="" Type="string" />
-        <RegistryValue Root="HKLM" Key="Software\LawCraft\Capabilities\FileAssociations" Name=".odt" Value="LawCraft.OpenDocumentText" Type="string" />
+        <RegistryValue Root="HKMU" Key="Software\Classes\LawCraft.OpenDocumentText\shell\open\command" Value="&quot;[#WordcraftExe]&quot; &quot;%1&quot;" Type="string" />
+        <RegistryValue Root="HKMU" Key="Software\Classes\.odt\OpenWithProgids" Name="LawCraft.OpenDocumentText" Value="" Type="string" />
+        <RegistryValue Root="HKMU" Key="Software\Classes\Applications\lawcraft.exe\SupportedTypes" Name=".odt" Value="" Type="string" />
+        <RegistryValue Root="HKMU" Key="Software\LawCraft\Capabilities\FileAssociations" Name=".odt" Value="LawCraft.OpenDocumentText" Type="string" />
 
         <ProgId Id="LawCraft.Markdown" Description="Markdown Document" Icon="WordcraftExe" IconIndex="0" />
-        <RegistryValue Root="HKLM" Key="Software\Classes\LawCraft.Markdown\shell\open\command" Value="&quot;[#WordcraftExe]&quot; &quot;%1&quot;" Type="string" />
-        <RegistryValue Root="HKLM" Key="Software\Classes\.md\OpenWithProgids" Name="LawCraft.Markdown" Value="" Type="string" />
-        <RegistryValue Root="HKLM" Key="Software\Classes\Applications\lawcraft.exe\SupportedTypes" Name=".md" Value="" Type="string" />
+        <RegistryValue Root="HKMU" Key="Software\Classes\LawCraft.Markdown\shell\open\command" Value="&quot;[#WordcraftExe]&quot; &quot;%1&quot;" Type="string" />
+        <RegistryValue Root="HKMU" Key="Software\Classes\.md\OpenWithProgids" Name="LawCraft.Markdown" Value="" Type="string" />
+        <RegistryValue Root="HKMU" Key="Software\Classes\Applications\lawcraft.exe\SupportedTypes" Name=".md" Value="" Type="string" />
 
         <ProgId Id="LawCraft.PlainText" Description="Text Document" Icon="WordcraftExe" IconIndex="0" />
-        <RegistryValue Root="HKLM" Key="Software\Classes\LawCraft.PlainText\shell\open\command" Value="&quot;[#WordcraftExe]&quot; &quot;%1&quot;" Type="string" />
-        <RegistryValue Root="HKLM" Key="Software\Classes\.txt\OpenWithProgids" Name="LawCraft.PlainText" Value="" Type="string" />
-        <RegistryValue Root="HKLM" Key="Software\Classes\Applications\lawcraft.exe\SupportedTypes" Name=".txt" Value="" Type="string" />
+        <RegistryValue Root="HKMU" Key="Software\Classes\LawCraft.PlainText\shell\open\command" Value="&quot;[#WordcraftExe]&quot; &quot;%1&quot;" Type="string" />
+        <RegistryValue Root="HKMU" Key="Software\Classes\.txt\OpenWithProgids" Name="LawCraft.PlainText" Value="" Type="string" />
+        <RegistryValue Root="HKMU" Key="Software\Classes\Applications\lawcraft.exe\SupportedTypes" Name=".txt" Value="" Type="string" />
       </Component>
 
       <Component Id="WordcraftCli">
