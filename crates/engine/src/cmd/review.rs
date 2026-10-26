@@ -606,6 +606,44 @@ fn resolve_sel_then(s: &mut Session, v: &Value, accept: bool) -> CmdResult {
     resolve_sel(s, accept, p::bool(v, "next") == Some(true))
 }
 
+/// The span of the tracked change around `off` in `p`: its run, joined across the comment anchors
+/// that split one revision's text into several runs.
+fn revision_span(p: &Paragraph, off: usize) -> Option<std::ops::Range<usize>> {
+    let runs: Vec<_> = p.run_ranges().collect();
+    let i = runs.iter().position(|(r, c)| r.start <= off && off <= r.end && (c.ins.is_some() || c.del.is_some() || c.fmt_change.is_some()))?;
+    let (mut start, mut end) = (runs[i].0.start, runs[i].0.end);
+    let key = (runs[i].1.ins, runs[i].1.del);
+    if key == (None, None) {
+        return Some(start..end);
+    }
+    // Comment anchors split a revision's text into several runs; the revision goes on past them.
+    let is_anchor = |k: usize| matches!(p.object_at(runs[k].0.start), Some(InlineObject::CommentStart { .. } | InlineObject::CommentEnd { .. }));
+    let same = |k: usize| (runs[k].1.ins, runs[k].1.del) == key;
+    let mut k = i;
+    while k > 0 {
+        if same(k - 1) {
+            k -= 1;
+        } else if is_anchor(k - 1) && k > 1 && same(k - 2) {
+            k -= 2;
+        } else {
+            break;
+        }
+        start = runs[k].0.start;
+    }
+    let mut k = i;
+    while k + 1 < runs.len() {
+        if same(k + 1) {
+            k += 1;
+        } else if is_anchor(k + 1) && k + 2 < runs.len() && same(k + 2) {
+            k += 2;
+        } else {
+            break;
+        }
+        end = runs[k].0.end;
+    }
+    Some(start..end)
+}
+
 fn resolve_sel(s: &mut Session, accept: bool, next: bool) -> CmdResult {
     let (a, b) = s.sel.ordered();
     // A caret right before a tracked paragraph mark (and no tracked text around it): that mark.
@@ -616,44 +654,7 @@ fn resolve_sel(s: &mut Session, accept: bool, next: bool) -> CmdResult {
     let (a, b) = if a == b {
         // The change at the caret: the run around it, else the paragraph mark right after it,
         // else the paragraph's formatting, else the table cell's.
-        let found = s.doc.para_at(&a).and_then(|p| {
-            let runs: Vec<_> = p.run_ranges().collect();
-            let i = runs
-                .iter()
-                .position(|(r, c)| r.start <= a.off && a.off <= r.end && (c.ins.is_some() || c.del.is_some() || c.fmt_change.is_some()))?;
-            let (mut start, mut end) = (runs[i].0.start, runs[i].0.end);
-            let key = (runs[i].1.ins, runs[i].1.del);
-            if key == (None, None) {
-                return Some(start..end);
-            }
-            // Comment anchors split a revision's text into several runs; the revision goes on past them.
-            let is_anchor =
-                |k: usize| matches!(p.object_at(runs[k].0.start), Some(InlineObject::CommentStart { .. } | InlineObject::CommentEnd { .. }));
-            let same = |k: usize| (runs[k].1.ins, runs[k].1.del) == key;
-            let mut k = i;
-            while k > 0 {
-                if same(k - 1) {
-                    k -= 1;
-                } else if is_anchor(k - 1) && k > 1 && same(k - 2) {
-                    k -= 2;
-                } else {
-                    break;
-                }
-                start = runs[k].0.start;
-            }
-            let mut k = i;
-            while k + 1 < runs.len() {
-                if same(k + 1) {
-                    k += 1;
-                } else if is_anchor(k + 1) && k + 2 < runs.len() && same(k + 2) {
-                    k += 2;
-                } else {
-                    break;
-                }
-                end = runs[k].0.end;
-            }
-            Some(start..end)
-        });
+        let found = s.doc.para_at(&a).and_then(|p| revision_span(p, a.off));
         let para_fmt = s.doc.para_at(&a).is_some_and(|p| p.props.fmt_change.is_some() || p.props.num_change.is_some());
         let mark_fmt = s.doc.para_at(&a).is_some_and(|p| a.off == p.len() && p.mark.fmt_change.is_some());
         match found {

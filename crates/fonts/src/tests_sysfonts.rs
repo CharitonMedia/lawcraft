@@ -1,5 +1,5 @@
 //! Installed system fonts: found by family name by every lookup, whatever ran before it (#22).
-
+#[allow(unused_imports)]
 use std::path::{Path, PathBuf};
 
 use super::*;

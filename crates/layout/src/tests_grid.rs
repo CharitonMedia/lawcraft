@@ -1,6 +1,7 @@
 //! Document grid (`w:docGrid`): line pitch and character pitch (#391). Assertions are relations
 //! to the pitch, never font metrics (fonts differ between machines; CJK glyphs may be missing).
 
+#[allow(unused_imports)]
 use super::*;
 use wordcraft_doc::props::LineSpacing;
 use wordcraft_doc::section::{DocGrid, DocGridType};
