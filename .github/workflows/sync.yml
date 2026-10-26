@@ -64,6 +64,13 @@ jobs:
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
 
+      # WordCraft's gate runs the tests with cargo-nextest, one process per test, and some of its
+      # tests count on that (a fresh process numbers documents from 1); LawCraft's gate does the same.
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
+        with:
+          tool: cargo-nextest@0.9.150
+
       - name: Alert test
         if: inputs.alert-test
         run: |
