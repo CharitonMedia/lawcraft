@@ -279,6 +279,14 @@ impl Session {
                 ime_state_exhausted: _,
             pending_ime_application_change: _,
             ime_origin: _,
+            // LawCraft's updater, for the whole app.
+            update_prefs: _,
+            update_http: _,
+            update_install: _,
+            update_exe: _,
+            update_env: _,
+            update_now_unix: _,
+            update_release_arch: _,
             // Set by modules for the whole app.
             export_check_commands: _,
             module_en: _,

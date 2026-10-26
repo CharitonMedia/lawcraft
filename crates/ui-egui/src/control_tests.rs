@@ -16,7 +16,7 @@ fn send(a: &mut WordApp, method: &str, params: Value) -> Value {
     let (req, _reply) = ControlRequest::new(method, params);
     match handle(a, &ctx, &req) {
         Outcome::Done(v) => v,
-        Outcome::Screenshot { .. } => json!({"ok": false, "error": "not a reply"}),
+        Outcome::Screenshot { .. } | Outcome::Deferred => json!({"ok": false, "error": "not a reply"}),
     }
 }
 

@@ -5722,6 +5722,7 @@ dependencies = [
  "rustls-platform-verifier",
  "ureq-proto",
  "utf8-zero",
+ "webpki-roots",
 ]
 
 [[package]]
@@ -6101,6 +6102,15 @@ name = "webpki-root-certs"
 version = "1.0.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e49d0e65abc00c142e8f9428da991da9f1a250c39be97459901eb12b9b49f62a"
+dependencies = [
+ "rustls-pki-types",
+]
+
+[[package]]
+name = "webpki-roots"
+version = "1.0.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f5f280bbb2b287bc8e7de7e3852945a0ff50d1bbcb5ed42b6c7a568c546df171"
 dependencies = [
  "rustls-pki-types",
 ]
@@ -6667,6 +6677,7 @@ dependencies = [
  "pollster 1.0.1",
  "rfd",
  "serde_json",
+ "ureq",
  "windows",
  "winit",
  "winresource",
@@ -6688,6 +6699,7 @@ version = "0.11.0"
 dependencies = [
  "serde_json",
  "sys-locale",
+ "ureq",
  "wordcraft-control-key",
  "wordcraft-doc",
  "wordcraft-engine",
@@ -6772,6 +6784,7 @@ dependencies = [
  "regex-automata",
  "serde",
  "serde_json",
+ "sha2 0.11.1",
  "thiserror 2.0.21",
  "wordcraft-doc",
  "wordcraft-docbin",

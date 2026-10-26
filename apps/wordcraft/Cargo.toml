@@ -87,6 +87,8 @@ pollster = "1"
 arboard = { workspace = true, features = ["image-data"] }
 # The control server's random key.
 getrandom = "0.3"
+# LawCraft's update check: GitHub's releases API and the installer download.
+ureq = "3.4"
 
 [target.'cfg(windows)'.dependencies]
 craft-update = { workspace = true }

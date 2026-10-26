@@ -163,6 +163,9 @@ impl WordApp {
             mac_titlebar: _,
             control_rx: _,
             updates_rt: _,
+            // LawCraft's updater.
+            update: _,
+            show_update_startup_prompt: _,
             addins: _,
             addins_out: _,
             addin_picks: _,
@@ -249,6 +252,7 @@ impl WordApp {
             // App-wide: preferences, recent lists, and the settings the session owns while
             // running.
             ribbon_collapsed: _,
+            update_prefs: _,
             quick_access_toolbar: _,
             recent: _,
             recent_symbols: _,
