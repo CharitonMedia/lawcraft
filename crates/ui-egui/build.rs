@@ -67,42 +67,10 @@ fn craft_i18n() -> String {
     for (code, shared, app) in entries {
         // `{:?}` escapes the path (Windows backslashes) as a Rust string literal.
         let shared = shared.map_or_else(|| "\"\"".to_string(), |p| format!("include_str!({p:?})"));
-        let app = with_lawcraft_rows(&code, &app);
         let _ = writeln!(o, "    ({code:?}, {shared}, include_str!({app:?})),");
     }
     o.push_str("];\n");
     o
-}
-
-/// LawCraft: `app` with the rows in `lawcraft-i18n/<code>.tsv` that it lacks, written to
-/// `OUT_DIR`; `app` itself when LawCraft has no rows for the locale.
-fn with_lawcraft_rows(code: &str, app: &std::path::Path) -> std::path::PathBuf {
-    let extra = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("lawcraft-i18n").join(format!("{code}.tsv"));
-    println!("cargo::rerun-if-changed={}", extra.display());
-    let (Ok(theirs), Ok(ours)) = (std::fs::read_to_string(app), std::fs::read_to_string(&extra)) else {
-        return app.to_path_buf();
-    };
-    let key = |l: &str| {
-        let mut c = l.splitn(3, '\t');
-        (c.next().map(str::to_string), c.next().map(str::to_string))
-    };
-    let have: std::collections::HashSet<_> = theirs.lines().filter(|l| !l.starts_with('#') && l.contains('\t')).map(key).collect();
-    let mut merged = theirs.trim_end().to_string();
-    merged.push_str("\n\n# LawCraft\n");
-    for l in ours.lines().filter(|l| !l.starts_with('#') && l.contains('\t')) {
-        if !have.contains(&key(l)) {
-            merged.push_str(l);
-            merged.push('\n');
-        }
-    }
-    let out = std::path::PathBuf::from(std::env::var_os("OUT_DIR").unwrap_or_default()).join(format!("lawcraft-{code}.tsv"));
-    match std::fs::write(&out, merged) {
-        Ok(()) => out,
-        Err(e) => {
-            println!("cargo::warning=writing {}: {e}; LawCraft's {code} rows are left out", out.display());
-            app.to_path_buf()
-        }
-    }
 }
 
 /// Every locale under `dir` with this app's catalog, by code: (code, its `common.tsv` if any, its

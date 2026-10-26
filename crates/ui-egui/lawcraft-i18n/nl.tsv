@@ -1,5 +1,0 @@
-# LawCraft's own interface strings for nl, added to WordCraft's catalog by build.rs.
-# Same format as craft-i18n's catalogs: context <TAB> English <TAB> translation.
-	Add-ins	Invoegtoepassingen
-	No add-ins are installed.	Er zijn geen invoegtoepassingen geïnstalleerd.
-	Each add-in stays off until you turn it on.	Elke invoegtoepassing blijft uit totdat u deze inschakelt.

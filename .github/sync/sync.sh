@@ -19,7 +19,6 @@ msg="Merge WordCraft main ($(git rev-parse --short upstream/main))"
 if ! git merge --no-edit -m "$msg" upstream/main; then
   while IFS= read -r f; do
     case "$f" in
-      crates/ui-egui/lawcraft-i18n/*.tsv) git checkout --ours -- "$f" && git add -- "$f" ;;
       README.md | NOTICE) git checkout --ours -- "$f" && git add -- "$f" ;;
       Cargo.lock) git checkout --theirs -- "$f" && git add -- "$f" ;;
     esac
