@@ -32,6 +32,14 @@ pub fn apply(s: &mut Session, p: &Profile, doc_type: &str) -> Result<Value, LawE
         page_numbers(s, pn, &mut applied)?;
     }
     let styles = styles(s, &spec.styles, &mut applied)?;
+    if let Some(ft) = &spec.footer_title {
+        crate::footer_title::apply(s, ft).map_err(|e| LawError::Failed(format!("footer title: {e}")))?;
+        applied.push("law.footerTitle".into());
+    }
+    if let Some(pp) = &spec.pleading_paper {
+        crate::pleading_paper::apply(s, pp).map_err(|e| LawError::Failed(format!("pleading paper: {e}")))?;
+        applied.push(if pp.enabled { "law.pleadingPaper.apply" } else { "law.pleadingPaper.remove" }.into());
+    }
     crate::checks::remember_applied(s, &p.id, doc_type);
     Ok(json!({"profile": p.id, "doc": doc_type, "applied": applied, "styles": styles}))
 }

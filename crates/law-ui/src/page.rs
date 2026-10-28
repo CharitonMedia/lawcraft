@@ -13,7 +13,8 @@ use wordcraft_ui_egui::theme::{Tokens, semibold};
 use crate::Ctx;
 
 /// Check kinds the profile schema and checks engine know.
-const CHECK_KINDS: &[&str] = &["wordLimit", "minFontSize", "minMargins", "minLineSpacing", "noHyperlinks", "textSearchablePdf", "requiredSections"];
+const CHECK_KINDS: &[&str] =
+    &["wordLimit", "minFontSize", "minMargins", "minLineSpacing", "noHyperlinks", "textSearchablePdf", "requiredSections", "pleadingPaper"];
 
 /// UI state for the LawCraft options page.
 #[derive(Clone, Debug, Default)]
@@ -178,7 +179,7 @@ pub fn commit_pending_drafts(app: &mut Ctx<'_>) -> bool {
 }
 
 /// Replace `profile` with the stored copy of `profile_id`, when it can be read.
-fn reload_profile(app: &mut Ctx<'_>, profile_id: &str, profile: &mut Value) {
+pub(crate) fn reload_profile(app: &mut Ctx<'_>, profile_id: &str, profile: &mut Value) {
     if let Ok(p) = app.run("law.profiles.get", json!({"id": profile_id})) {
         *profile = p;
     }
@@ -352,6 +353,9 @@ fn profile_editor(app: &mut Ctx<'_>, ui: &mut Ui, id: &str, list: &[Value]) {
 
     wordcraft_ui_egui::options::section(ui, "Styles");
     styles_editor(app, ui, id, &doc_key, &doc, &mut profile);
+
+    wordcraft_ui_egui::options::section(ui, "Pleading Paper");
+    crate::pleading_paper::editor(app, ui, id, &doc_key, &doc, &mut profile);
 
     wordcraft_ui_egui::options::section(ui, "Checks");
     checks_editor(app, ui, id, &doc_key, &doc, &mut profile);
@@ -850,7 +854,7 @@ fn check_id_list_editor(
 }
 
 /// Merge `patch` into one document type of `profile` and save the profile; `false` when the save fails.
-fn save_doc(app: &mut Ctx<'_>, profile_id: &str, doc_key: &str, profile: &mut Value, patch: Value) -> bool {
+pub(crate) fn save_doc(app: &mut Ctx<'_>, profile_id: &str, doc_key: &str, profile: &mut Value, patch: Value) -> bool {
     let doc = profile["docs"].get(doc_key).cloned().unwrap_or(Value::Null);
     let mut merged = doc.as_object().cloned().unwrap_or_default();
     if let Some(p) = patch.as_object() {

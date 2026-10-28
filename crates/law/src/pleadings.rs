@@ -103,6 +103,9 @@ pub fn new_pleading(s: &mut Session, v: &Value) -> CmdResult {
     let Some(profile) = store().get(PROFILE).cloned() else { return Err(CmdError::Failed(format!("no court profile `{PROFILE}`"))) };
     crate::apply::apply(s, &profile, form.kind).map_err(|e| CmdError::Failed(e.to_string()))?;
     let sections = Writer { s, started: false, lists: Vec::new() }.write(&form)?;
+    // File › Properties › Title: what a `TITLE` field in the footer shows (California's footer).
+    s.join_next_undo();
+    s.run("file.properties", &json!({"title": form.title}))?;
     Ok(json!({"profile": PROFILE, "type": form.kind, "sections": sections}))
 }
 

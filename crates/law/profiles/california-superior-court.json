@@ -1,0 +1,127 @@
+{
+  "schema": 1,
+  "id": "california-superior-court",
+  "name": "California superior court",
+  "jurisdiction": "California",
+  "verified": true,
+  "docs": {
+    "pleading": {
+      "label": "Pleading",
+      "page": {
+        "size": "Letter",
+        "top": 72,
+        "bottom": 48,
+        "left": 90,
+        "right": 36
+      },
+      "pleadingPaper": {
+        "lines": 28,
+        "spacing": 24,
+        "numberFont": "Times New Roman",
+        "numberSize": 12,
+        "leftRule": "double",
+        "rightRule": "single"
+      },
+      "footerTitle": {
+        "size": 10,
+        "rule": true,
+        "distance": 9
+      },
+      "pageNumbers": {
+        "position": "bottom",
+        "align": "center",
+        "xOfY": false,
+        "format": "decimal"
+      },
+      "styles": [
+        {
+          "name": "Normal",
+          "chr": {
+            "font": "Times New Roman",
+            "size": 12
+          },
+          "para": {
+            "lineSpacing": {
+              "rule": "exactly",
+              "value": 24
+            },
+            "spaceBefore": 0,
+            "spaceAfter": 0
+          }
+        },
+        {
+          "name": "Block Quote",
+          "basedOn": "Normal",
+          "next": "Normal",
+          "para": {
+            "indentLeft": 36,
+            "indentRight": 36,
+            "lineSpacing": {
+              "rule": "exactly",
+              "value": 12
+            }
+          }
+        },
+        {
+          "name": "Footnote Text",
+          "basedOn": "Normal",
+          "next": "Footnote Text",
+          "para": {
+            "lineSpacing": {
+              "rule": "exactly",
+              "value": 12
+            }
+          }
+        },
+        {
+          "name": "Header",
+          "basedOn": "Normal",
+          "next": "Header",
+          "para": {
+            "lineSpacing": {
+              "rule": "exactly",
+              "value": 12
+            }
+          }
+        },
+        {
+          "name": "Footer",
+          "basedOn": "Normal",
+          "next": "Footer",
+          "chr": {
+            "size": 10
+          },
+          "para": {
+            "lineSpacing": {
+              "rule": "exactly",
+              "value": 12
+            }
+          }
+        }
+      ],
+      "sections": [
+        {
+          "id": "body",
+          "name": "Body",
+          "style": "Normal"
+        }
+      ],
+      "checks": [
+        {
+          "kind": "minFontSize",
+          "pt": 12,
+          "source": "Cal. Rules of Court, rule 2.104",
+          "effective": "2017-01-01"
+        },
+        {
+          "kind": "pleadingPaper",
+          "limit": 3,
+          "source": "Cal. Rules of Court, rule 2.108(4)",
+          "effective": "2016-01-01"
+        }
+      ],
+      "source": "Cal. Rules of Court, rules 2.104, 2.107, 2.108, 2.110",
+      "effective": "2017-01-01"
+    }
+  }
+}

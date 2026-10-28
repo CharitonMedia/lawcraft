@@ -83,6 +83,7 @@ fn run_one(
             }
         }
         "requiredSections" => required_sections(sections, check, id, out),
+        "pleadingPaper" => pleading_paper(doc, check, id, out),
         _ => {}
     }
 }
@@ -602,6 +603,21 @@ pub fn register_document_hook() {
         wordcraft_engine::hooks::register_on_document_loaded(restore_export_registration);
         wordcraft_engine::hooks::register_on_update_fields(crate::certificate::on_update_fields);
     });
+}
+
+/// Flag a document without LawCraft's pleading paper, or with fewer than `limit` numbers per
+/// vertical inch (default 3, California Rules of Court 2.108(4)).
+fn pleading_paper(doc: &Document, check: &CheckSpec, id: &str, out: &mut Vec<Finding>) {
+    let source = &check.source;
+    let Some(pp) = crate::pleading_paper::get(doc).filter(|pp| pp.enabled) else {
+        out.push(Finding::error(id, format!("Pleading paper is required; turn it on with Law › Pleading Paper ({source})")));
+        return;
+    };
+    let per_inch = 72.0 / pp.spacing;
+    let want = check.limit.unwrap_or(3) as f32;
+    if per_inch + 0.001 < want {
+        out.push(Finding::error(id, format!("Line numbers are {} pt apart: {per_inch:.2} per inch, fewer than {want} ({source})", pp.spacing)));
+    }
 }
 
 #[cfg(test)]

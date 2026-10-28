@@ -211,7 +211,8 @@ impl Store {
 }
 
 /// The profiles this crate ships, each one verified: a Missouri appellate brief (Rules 84.03,
-/// 84.04 and 84.06), a federal one (FRAP 32) and Missouri circuit court pleadings. A bundled
+/// 84.04 and 84.06), a federal one (FRAP 32), Missouri circuit court pleadings and California superior court
+/// pleadings on pleading paper (Cal. Rules of Court 2.104 to 2.110). A bundled
 /// file that doesn't parse is logged and left out, never fatal —
 /// `bundled_profiles_are_valid_and_verified` keeps them honest.
 pub fn bundled() -> Vec<Profile> {
@@ -219,6 +220,7 @@ pub fn bundled() -> Vec<Profile> {
         include_str!("../profiles/missouri-appellate-brief.json"),
         include_str!("../profiles/federal-appellate-brief.json"),
         include_str!("../profiles/missouri-circuit-court.json"),
+        include_str!("../profiles/california-superior-court.json"),
     ]
     .iter()
     .filter_map(|text| match Profile::from_json(text) {
@@ -293,7 +295,7 @@ mod tests {
     #[test]
     fn bundled_profiles_are_valid_and_verified() {
         let all = bundled();
-        assert_eq!(all.len(), 3, "Missouri appellate, federal and Missouri circuit court");
+        assert_eq!(all.len(), 4, "Missouri appellate, federal, Missouri circuit court and California superior court");
         for p in &all {
             assert!(p.verified, "{} ships verified", p.id);
             assert!(crate::profile::problems(p).is_empty(), "{}: {:?}", p.id, crate::profile::problems(p));

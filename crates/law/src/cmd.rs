@@ -20,6 +20,7 @@ use crate::certificate;
 use crate::checks;
 use crate::citation_pack::CompiledPack;
 use crate::citations;
+use crate::pleading_paper;
 use crate::pleadings;
 use crate::profile::{Patch, Profile};
 use crate::proofing;
@@ -93,7 +94,7 @@ pub fn specs() -> Vec<CommandSpec> {
             Ok(p.to_value())
         })
         .params(
-            r#"the profile: {"schema": 1, "id": string, "name": string, "jurisdiction": string, "verified"?: bool, "citationPack"?: string, "docs": {<document type>: {"label"?, "page": Page, "lineNumbers"?: LineNumbers, "pageNumbers"?: PageNumbers, "styles": [Style], "sections": [Section], "checks": [Check], "source": string, "effective"?: "YYYY-MM-DD"}}}"#,
+            r#"the profile: {"schema": 1, "id": string, "name": string, "jurisdiction": string, "verified"?: bool, "citationPack"?: string, "docs": {<document type>: {"label"?, "page": Page, "lineNumbers"?: LineNumbers, "pleadingPaper"?: PleadingPaper (law.pleadingPaper.apply's fields), "footerTitle"?: {"size"?: pt, "rule"?: bool, "distance"?: pt}, "pageNumbers"?: PageNumbers, "styles": [Style], "sections": [Section], "checks": [Check], "source": string, "effective"?: "YYYY-MM-DD"}}}"#,
         )
         .pure(),
         CommandSpec::new("law.profiles.update", "Update Court Profile", LOC, |_, v| {
@@ -216,6 +217,17 @@ pub fn specs() -> Vec<CommandSpec> {
         // core's Review menu and its interface catalogs carry no court-specific entry.
         CommandSpec::new("law.pleadings.new", "New Pleading", PLEADINGS_LOC, pleadings::new_pleading).params(
             r#"{} opens the New Pleading dialog; or {"type": "motion|notice|answer|petition", "title": string, "courtType"?: string (default "CIRCUIT"), "county": string, "caseNumber": string (may be empty for a petition), "firstSide": {"names": [string | {"name": string, "client"?: bool, "proSe"?: bool, "address"?: string (required for proSe)}], "role": string}, "secondSide": (same), "weRepresent"?: "first|second" (when no name sets client: every party on that side), "service"?: "efileCounsel|efileUsps" (not for a petition; efileUsps mails servedParty at servedAddress too), "servedParty"?: string, "servedAddress"?: string, "filingDate"?: "YYYY-MM-DD" (default today, UTC), "verified"?: bool (petition only), "firm"?: Firm (default: law.firm.get)} → {"profile", "type", "sections": [section id]}; writes into a blank document only"#,
+        ),
+        CommandSpec::new("law.pleadingPaper.apply", "Pleading Paper", PLEADINGS_LOC, pleading_paper::apply_cmd).params(
+            r#"{"lines"?: 10–50 (28), "spacing"?: pt 12–36 (24), "start"?: pt below the top margin (0), "numberFont"?: string, "numberSize"?: pt (12), "numberGap"?: pt (8), "leftRule"?: "double|single|none", "rightRule"?: "single|none", "ruleGap"?: pt (4), "ruleWidth"?: pt (0.75), "enabled"?: bool} → the settings applied: numbered lines down the left margin of every page and rules beside the text, in the page headers; replaces any LawCraft pleading paper already there"#,
+        ),
+        CommandSpec::new("law.pleadingPaper.remove", "Remove Pleading Paper", PLEADINGS_LOC, pleading_paper::remove_cmd)
+            .params(r#"{} → {"removed": n}: takes LawCraft's pleading-paper objects out of every header; nothing else in them changes"#),
+        CommandSpec::new("law.pleadingPaper.get", "Pleading Paper Settings", PLEADINGS_LOC, pleading_paper::get_cmd)
+            .params(r#"{} → the settings in effect, or null when the document has no LawCraft pleading paper"#)
+            .pure(),
+        CommandSpec::new("law.pleadingPaper.toggle", "Pleading Paper", PLEADINGS_LOC, pleading_paper::toggle_cmd).params(
+            r#"law.pleadingPaper.apply's settings → {"on": bool, …}: on with the settings (defaults: 28 lines) when the document has none, off when it has"#,
         ),
         CommandSpec::new("law.firm.get", "Firm Details", PLEADINGS_LOC, pleadings::firm_get)
             .params(r#"{} → the saved firm details {"firmName", "address1", "address2"?, "city", "state", "zip", "phone", "fax"?, "email", "attorneyName", "barNumber"}, or {}"#)

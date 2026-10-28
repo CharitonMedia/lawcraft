@@ -8,8 +8,9 @@ the command palette, the CLI, the control channel and the MCP server can do — 
 and the same Restrict Editing checks.
 
 Nothing here knows any court's rules except the profile files that ship with it. Bundled:
-**missouri-appellate-brief**, **federal-appellate-brief** and **missouri-circuit-court** (motions,
-notices, answers and petitions; see [Pleadings](#pleadings)). Other courts are entered by users or
+**missouri-appellate-brief**, **federal-appellate-brief**, **missouri-circuit-court** (motions,
+notices, answers and petitions; see [Pleadings](#pleadings)) and **california-superior-court**
+(pleadings on [pleading paper](#pleading-paper)). Other courts are entered by users or
 their agents.
 
 ## Turning it on
@@ -236,10 +237,65 @@ court profiles folder; that file is not a profile and the profile loader skips i
 and values over 200 characters are refused. They are never written into a document's properties
 and never sent anywhere.
 
+## Pleading paper
+
+Pleading paper by Patrick Nolan, reported by David Seto.
+
+Pleading paper is ordinary Letter paper with consecutive line numbers down the left margin, 1 to
+28 on every page, a double rule between the numbers and the text and a single rule on the right.
+California requires it for trial-court papers (California Rules of Court 2.108); a few other
+courts use it too.
+
+Press **Law › Pleading Paper** to turn it on or off, or use the commands:
+
+| Command | Params | Result |
+|---|---|---|
+| `law.pleadingPaper.apply` | any of the fields below | the settings applied |
+| `law.pleadingPaper.remove` | `{}` | `{"removed": n}` |
+| `law.pleadingPaper.get` | `{}` | the settings in effect, or `null` |
+| `law.pleadingPaper.toggle` | as `apply` | `{"on": bool, …}` |
+
+| Field | Default | Meaning |
+|---|---|---|
+| `lines` | 28 | Numbers per page (10 to 50). |
+| `spacing` | 24 | Points between numbers (12 to 36). |
+| `start` | 0 | Points from the top margin to number 1. |
+| `numberFont` | the header's | Font of the numbers. |
+| `numberSize` | 12 | Size of the numbers, points. |
+| `numberGap` | 8 | Points between the numbers and the left rule. |
+| `leftRule` | `double` | `double`, `single` or `none`. |
+| `rightRule` | `single` | `single` or `none`. |
+| `ruleGap` | 4 | Points between each rule and the text. |
+| `ruleWidth` | 0.75 | Rule weight, points. |
+| `enabled` | true | `false` takes it off. |
+
+The numbers are a text box and the rules are straight connectors in each page header, behind the
+text and fixed to the page, the way Word's pleading templates draw them. Every page that shows a
+header shows them; a section with a first-page or even-page header gets a set there too. Each
+object's alt-text title is `LawCraft pleading paper` (marked decorative), so applying again
+replaces the set, removing takes only LawCraft's objects and leaves the rest of the header alone,
+and the number box's alt text holds the settings `get` reads back. Applying or removing is one undo
+step. A `.docx` keeps them as ordinary header drawings that Word and LibreOffice show.
+
+In a court profile, a document type's `pleadingPaper` block takes the same fields; applying the
+profile applies it, and `"enabled": false` takes it off. It can't be on together with
+`lineNumbers.enabled`. A `footerTitle` block (`size`, default 10; `rule`, default true; `distance`,
+the footer's distance from the page edge) puts a `TITLE` field, centered below the page number with
+a printed line above it, in the footer (rule 2.110). `law.pleadings.new` sets File › Properties ›
+Title from the pleading's title, so the field shows it. The `pleadingPaper` check flags a document
+without pleading paper, or with fewer than `limit` numbers per vertical inch (default 3).
+
+**california-superior-court** (one document type, `pleading`) ships verified: Letter, margins top
+1 in, bottom 2/3 in, left 1.25 in, right 1/2 in (rule 2.107); 28 numbered lines; Times New Roman
+12 pt exactly double-spaced (rules 2.104, 2.108(1)), block quotes and footnotes single-spaced (rule
+2.108(3)); page number and a 10 pt title in the footer (rule 2.110). The first-page layout of rule
+2.111 (attorney block on line 1, court name on line 8) is typed by hand onto the numbered lines.
+
 ## Revision history
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-28 | minor | Pleading paper by Patrick Nolan, reported by David Seto: `law.pleadingPaper.apply`/`remove`/`get`/`toggle` and Law › Pleading Paper, a `pleadingPaper` profile block and check, a `footerTitle` block, and the bundled `california-superior-court` profile |
 | 2026-10-15 | minor | Pleadings: bundled `missouri-circuit-court` profile (motion, notice, answer, petition), `law.pleadings.new` writes the filing skeleton, `law.firm.get`/`law.firm.set` keep the firm details, and a section may be found by its style (`matchStyle`) |
 | 2026-10-14 | minor | Legal spell-check supplement (`law.words.list`) and confusion-pair proofing (`law.proof.confusions`) hooked into WordCraft's English proofing when LawCraft is on |
 | 2026-10-14 | patch | `textSearchablePdf` now names the page for a picture-dominated page even when the document has no substantive text: an image-only scan and a scan with only a caption or page-number footer are a page-specific warning, not a document-wide "not searchable" error |

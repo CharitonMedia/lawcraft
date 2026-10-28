@@ -7,7 +7,8 @@
 //! validated, approved, imported, exported and applied through commands, so the ribbon, the
 //! command palette, the CLI, the JSON control channel and the MCP server all reach them.
 //!
-//! Three profiles ship verified: a Missouri appellate brief (Rules 84.03, 84.04, 84.06), a
+//! Four profiles ship verified: California superior court pleadings on pleading paper
+//! ([`pleading_paper`], Cal. Rules of Court 2.104 to 2.110), a Missouri appellate brief (Rules 84.03, 84.04, 84.06), a
 //! federal appellate brief (FRAP 32) and Missouri circuit court pleadings (motion, notice, answer,
 //! petition), which `law.pleadings.new` writes a filing skeleton for. Every rule in them records
 //! the rule it comes from and when it took effect. Other courts are entered by users or their
@@ -31,7 +32,7 @@
 //! session.prefs.modules.insert("law".into(), true);
 //! wordcraft_law::install(&mut session);
 //! let profiles = session.run("law.profiles.list", &json!({})).expect("list");
-//! assert_eq!(profiles.as_array().map(Vec::len), Some(3));
+//! assert_eq!(profiles.as_array().map(Vec::len), Some(4));
 //! ```
 
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
@@ -43,6 +44,8 @@ pub mod checks;
 pub mod citation_pack;
 pub mod citations;
 pub mod cmd;
+pub mod footer_title;
+pub mod pleading_paper;
 pub mod pleadings;
 pub mod profile;
 mod proofing;
@@ -69,7 +72,10 @@ pub fn specs() -> Vec<wordcraft_engine::CommandSpec> {
 
 /// The Law tab: New Pleading first, then the legal symbols.
 pub fn ribbon_groups() -> Vec<wordcraft_engine::ribbon::CustomGroup> {
-    let mut groups = vec![wordcraft_engine::ribbon::CustomGroup { name: "Pleadings".into(), commands: vec!["law.pleadings.new".into()] }];
+    let mut groups = vec![wordcraft_engine::ribbon::CustomGroup {
+        name: "Pleadings".into(),
+        commands: vec!["law.pleadings.new".into(), "law.pleadingPaper.toggle".into()],
+    }];
     groups.extend(symbols::ribbon_groups());
     groups
 }
@@ -131,3 +137,6 @@ mod tests_certificate;
 
 #[cfg(test)]
 mod tests_pleadings;
+
+#[cfg(test)]
+mod tests_pleading_paper;

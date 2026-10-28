@@ -8,6 +8,7 @@
 
 mod page;
 pub mod pleading;
+mod pleading_paper;
 
 use std::ops::{Deref, DerefMut};
 

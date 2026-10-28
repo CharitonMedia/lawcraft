@@ -70,6 +70,14 @@ pub struct DocSpec {
     /// Line numbers, as `layout.lineNumbers` takes them; `None` leaves the document's alone.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub line_numbers: Option<LineNumbersSpec>,
+    /// Pleading paper ([`crate::pleading_paper`]): numbered lines down the left margin and the
+    /// rules beside the text. `None` leaves the document's alone.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pleading_paper: Option<PleadingPaperSpec>,
+    /// The paper's title in the footer, below the page number and a printed line (California
+    /// Rules of Court 2.110). `None` adds none.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub footer_title: Option<FooterTitleSpec>,
     /// Page numbering in the header or footer.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub page_numbers: Option<PageNumbersSpec>,
@@ -139,6 +147,75 @@ pub struct LineNumbersSpec {
     /// Distance between the numbers and the text, points (0 = automatic).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub distance: Option<f32>,
+}
+
+/// Pleading paper settings, as `law.pleadingPaper.apply` takes them. Every field has a default,
+/// so `{}` is California's 28 lines.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields, rename_all = "camelCase")]
+pub struct PleadingPaperSpec {
+    /// Off: no pleading paper (applying a profile with this takes LawCraft's off).
+    pub enabled: bool,
+    /// Numbers per page.
+    pub lines: u32,
+    /// Distance between numbers, points.
+    pub spacing: f32,
+    /// Offset of number 1 below the top margin, points.
+    pub start: f32,
+    /// Font of the numbers; `None` keeps the header's.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub number_font: Option<String>,
+    /// Size of the numbers, points.
+    pub number_size: f32,
+    /// Gap between the numbers and the left rule, points.
+    pub number_gap: f32,
+    /// `double`, `single` or `none`: the rule between the numbers and the text.
+    pub left_rule: String,
+    /// `single` or `none`: the rule right of the text.
+    pub right_rule: String,
+    /// Gap between each rule and the text, points.
+    pub rule_gap: f32,
+    /// Line weight of the rules, points.
+    pub rule_width: f32,
+}
+
+impl Default for PleadingPaperSpec {
+    fn default() -> Self {
+        PleadingPaperSpec {
+            enabled: true,
+            lines: 28,
+            spacing: 24.0,
+            start: 0.0,
+            number_font: None,
+            number_size: 12.0,
+            number_gap: 8.0,
+            left_rule: "double".into(),
+            right_rule: "single".into(),
+            rule_gap: 4.0,
+            rule_width: 0.75,
+        }
+    }
+}
+
+/// The document's title in the footer: a `TITLE` field (File › Properties › Title), centered
+/// below the page number with a printed line above it.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields, rename_all = "camelCase")]
+pub struct FooterTitleSpec {
+    /// Type size of the title, points.
+    pub size: f32,
+    /// Draw the printed line above the title.
+    pub rule: bool,
+    /// Footer distance from the page's bottom edge, points (`hf.position`); `None` keeps the
+    /// section's.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub distance: Option<f32>,
+}
+
+impl Default for FooterTitleSpec {
+    fn default() -> Self {
+        FooterTitleSpec { size: 10.0, rule: true, distance: None }
+    }
 }
 
 /// Page numbering in the header or footer, applied with `insert.pageNumber` and
@@ -243,7 +320,8 @@ pub struct SectionSpec {
 #[serde(default, deny_unknown_fields, rename_all = "camelCase")]
 pub struct CheckSpec {
     /// `wordLimit`, `minFontSize`, `minMargins`, `minLineSpacing`, `noHyperlinks`,
-    /// `textSearchablePdf` or `requiredSections`.
+    /// `textSearchablePdf`, `requiredSections` or `pleadingPaper` (LawCraft's pleading paper is
+    /// on, with at least `limit` numbers per vertical inch; default 3).
     pub kind: String,
     /// `wordLimit`: the most words the document may have.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -413,6 +491,31 @@ fn check_doc(out: &mut Vec<String>, at: &str, d: &DocSpec) {
     if let Some(ln) = &d.line_numbers {
         check_line_numbers(out, &format!("{at}.lineNumbers"), ln);
     }
+    if let Some(pp) = &d.pleading_paper {
+        check_pleading_paper(out, &format!("{at}.pleadingPaper"), pp);
+        // Word-style line numbers and pleading paper would number the same page twice.
+        if pp.enabled && d.line_numbers.as_ref().is_some_and(|ln| ln.enabled) {
+            out.push(format!("{at}: pleadingPaper and lineNumbers can't both be on"));
+        }
+        if pp.enabled {
+            let top = d.page.top.unwrap_or(72.0);
+            let height = d.page.height.unwrap_or(792.0);
+            let room = height - top - pp.start;
+            let need = pp.lines as f32 * pp.spacing;
+            if need > room + 0.01 {
+                out.push(format!(
+                    "{at}.pleadingPaper: {} lines at {} pt need {need} pt; the page has {room} pt below the top margin",
+                    pp.lines, pp.spacing
+                ));
+            }
+        }
+    }
+    if let Some(ft) = &d.footer_title {
+        check_points(out, &format!("{at}.footerTitle.size"), ft.size, 6.0, MAX_TYPE);
+        if let Some(dist) = ft.distance {
+            check_points(out, &format!("{at}.footerTitle.distance"), dist, 0.0, 72.0);
+        }
+    }
     if let Some(pn) = &d.page_numbers {
         check_page_numbers(out, &format!("{at}.pageNumbers"), pn);
     }
@@ -554,6 +657,26 @@ fn check_line_numbers(out: &mut Vec<String>, at: &str, ln: &LineNumbersSpec) {
     }
 }
 
+/// Check pleading paper settings: counts, distances and rule kinds.
+pub fn check_pleading_paper(out: &mut Vec<String>, at: &str, pp: &PleadingPaperSpec) {
+    check_count(out, &format!("{at}.lines"), pp.lines, 10, 50);
+    check_points(out, &format!("{at}.spacing"), pp.spacing, 12.0, 36.0);
+    check_points(out, &format!("{at}.start"), pp.start, -72.0, 144.0);
+    check_points(out, &format!("{at}.numberSize"), pp.number_size, 6.0, 72.0);
+    check_points(out, &format!("{at}.numberGap"), pp.number_gap, 0.0, 72.0);
+    check_points(out, &format!("{at}.ruleGap"), pp.rule_gap, 0.0, 72.0);
+    check_points(out, &format!("{at}.ruleWidth"), pp.rule_width, 0.25, 6.0);
+    if let Some(f) = &pp.number_font {
+        check_text(out, &format!("{at}.numberFont"), f);
+    }
+    if !matches!(pp.left_rule.as_str(), "double" | "single" | "none") {
+        out.push(format!("{at}.leftRule `{}` is not double, single or none", pp.left_rule));
+    }
+    if !matches!(pp.right_rule.as_str(), "single" | "none") {
+        out.push(format!("{at}.rightRule `{}` is not single or none", pp.right_rule));
+    }
+}
+
 /// Check page numbering: position, alignment, number format, start and prefix.
 fn check_page_numbers(out: &mut Vec<String>, at: &str, pn: &PageNumbersSpec) {
     if !matches!(pn.position.as_str(), "top" | "bottom") {
@@ -608,6 +731,11 @@ fn check_check(out: &mut Vec<String>, at: &str, c: &CheckSpec, section_ids: &[&s
             check_points(out, &format!("{at}.pt"), pt, 1.0, MAX_TYPE);
         }
         "noHyperlinks" | "textSearchablePdf" => {}
+        "pleadingPaper" => {
+            if let Some(n) = c.limit {
+                check_count(out, &format!("{at}.limit"), n, 1, 12);
+            }
+        }
         "minMargins" => {
             if let Some(pt) = c.pt {
                 check_points(out, &format!("{at}.pt"), pt, 0.0, MAX_PT);
@@ -642,7 +770,7 @@ fn check_check(out: &mut Vec<String>, at: &str, c: &CheckSpec, section_ids: &[&s
         }
         other => {
             out.push(format!(
-                "{at}.kind `{other}` is not a check this WordCraft knows (wordLimit, minFontSize, minMargins, minLineSpacing, noHyperlinks, textSearchablePdf, requiredSections)"
+                "{at}.kind `{other}` is not a check this WordCraft knows (wordLimit, minFontSize, minMargins, minLineSpacing, noHyperlinks, textSearchablePdf, requiredSections, pleadingPaper)"
             ));
         }
     }
