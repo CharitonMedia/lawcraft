@@ -500,7 +500,7 @@ fn form_ui(ui: &mut Ui, form: &mut PleadingForm) {
         if !form.courts.is_empty() {
             let l = ui.label("Saved court");
             let mut pick: Option<Value> = None;
-            egui::ComboBox::from_id_salt("law_saved_court")
+            craft_ui::ComboBox::from_id_salt("law_saved_court")
                 .selected_text("Choose a court…")
                 .width(260.0)
                 .show_ui(ui, |ui| {
@@ -623,7 +623,7 @@ fn side_ui(
         ui.horizontal(|ui| {
             let l = ui.label("Role");
             let shown = if side.other { "Other".to_string() } else { side.role.clone() };
-            egui::ComboBox::from_id_salt("role")
+            craft_ui::ComboBox::from_id_salt("role")
                 .selected_text(shown)
                 .width(140.0)
                 .show_ui(ui, |ui| {

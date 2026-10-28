@@ -13,6 +13,8 @@ wordcraft-engine = { workspace = true }
 wordcraft-law = { workspace = true }
 wordcraft-ui-egui = { workspace = true }
 egui = { workspace = true }
+# The same craft-libs rev as wordcraft-ui-egui's (docs/lawcraft-sync.md): its combo box.
+craft-ui = { git = "https://github.com/storytold/craft-libs", rev = "92d392cff132eaf53e13afff77f38b5c11b73aa0" }
 serde_json = { workspace = true }
 
 [dev-dependencies]

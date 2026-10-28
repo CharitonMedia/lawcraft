@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # Merge WordCraft's main into LawCraft's main (run by .github/workflows/sync.yml).
 #
-# Resolves the conflicts LawCraft expects on every merge: LawCraft's own interface catalogs (LawCraft's),
+# Resolves the conflicts LawCraft expects on every merge (docs/lawcraft-sync.md lists them):
 # README.md and NOTICE (LawCraft's), Cargo.lock (WordCraft's, then cargo adds LawCraft's crates
-# back). Any other conflict stops the merge and reports the files on $GITHUB_OUTPUT.
+# back), the Windows installer (LawCraft's), and the packaging and workflow files LawCraft only
+# renames (WordCraft's, renamed by known_fixes.py). Any other conflict stops the merge and reports
+# the files on $GITHUB_OUTPUT.
 set -euo pipefail
 out="${GITHUB_OUTPUT:-/dev/stdout}"
 
@@ -21,6 +23,11 @@ if ! git merge --no-edit -m "$msg" upstream/main; then
     case "$f" in
       README.md | NOTICE) git checkout --ours -- "$f" && git add -- "$f" ;;
       Cargo.lock) git checkout --theirs -- "$f" && git add -- "$f" ;;
+      # LawCraft builds its own MSI (lawcraft.exe, its own UpgradeCode); WordCraft's changes to
+      # its installer don't apply.
+      packaging/windows/package.ps1 | packaging/windows/wordcraft.wxs) git checkout --ours -- "$f" && git add -- "$f" ;;
+      # Files LawCraft only renames: WordCraft's version with LawCraft's names (known_fixes.py).
+      *) .github/sync/known_fixes.py "$f" >/dev/null || true ;;
     esac
   done < <(git diff --name-only --diff-filter=U)
   left="$(git diff --name-only --diff-filter=U | tr '\n' ' ')"

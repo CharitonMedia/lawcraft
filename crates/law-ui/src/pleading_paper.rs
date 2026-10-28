@@ -76,7 +76,7 @@ pub fn editor(app: &mut Ctx<'_>, ui: &mut Ui, profile_id: &str, doc_key: &str, d
             let l = ui.label(label);
             let cur = b[key].as_str().unwrap_or(options[0]).to_string();
             let mut pick = cur.clone();
-            egui::ComboBox::from_id_salt(("law_pp_rule", key, profile_id, doc_key))
+            craft_ui::ComboBox::from_id_salt(("law_pp_rule", key, profile_id, doc_key))
                 .selected_text(&pick)
                 .show_ui(ui, |ui| {
                     for o in options {
