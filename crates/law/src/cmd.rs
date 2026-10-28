@@ -20,6 +20,8 @@ use crate::certificate;
 use crate::checks;
 use crate::citation_pack::CompiledPack;
 use crate::citations;
+use crate::contacts;
+use crate::courts;
 use crate::pleading_paper;
 use crate::pleadings;
 use crate::profile::{Patch, Profile};
@@ -216,8 +218,26 @@ pub fn specs() -> Vec<CommandSpec> {
         // The court-check findings last stored for this document. LawCraft's own command, so
         // core's Review menu and its interface catalogs carry no court-specific entry.
         CommandSpec::new("law.pleadings.new", "New Pleading", PLEADINGS_LOC, pleadings::new_pleading).params(
-            r#"{} opens the New Pleading dialog; or {"type": "motion|notice|answer|petition", "title": string, "courtType"?: string (default "CIRCUIT"), "county": string, "caseNumber": string (may be empty for a petition), "firstSide": {"names": [string | {"name": string, "client"?: bool, "proSe"?: bool, "address"?: string (required for proSe)}], "role": string}, "secondSide": (same), "weRepresent"?: "first|second" (when no name sets client: every party on that side), "service"?: "efileCounsel|efileUsps" (not for a petition; efileUsps mails servedParty at servedAddress too), "servedParty"?: string, "servedAddress"?: string, "filingDate"?: "YYYY-MM-DD" (default today, UTC), "verified"?: bool (petition only), "firm"?: Firm (default: law.firm.get)} → {"profile", "type", "sections": [section id]}; writes into a blank document only"#,
+            r#"{} opens the New Pleading dialog; or {"type": "motion|notice|answer|petition", "title": string, "courtType"?: string (default "CIRCUIT"), "county": string, "caseNumber": string (may be empty for a petition), "firstSide": {"names": [string | {"name": string, "client"?: bool, "proSe"?: bool, "address"?: string (required for proSe)}], "role": string}, "secondSide": (same), "weRepresent"?: "first|second" (when no name sets client: every party on that side), "service"?: "efileCounsel|efileUsps" (not for a petition; efileUsps mails servedParty at servedAddress too), "servedParty"?: string, "servedAddress"?: string, "filingDate"?: "YYYY-MM-DD" (default today, UTC), "verified"?: bool (petition only), "firm"?: Firm (default: law.firm.get), "court"?: saved court id (fills courtType, county and division), "division"?: string (a Division line in the caption), "saveCourt"?: name (save this court)} → {"profile", "type", "sections": [section id], "court"?}; writes into a blank document only; every value goes in a content control tagged law:<field>, so law.pleadings.edit can change it"#,
         ),
+        CommandSpec::new("law.pleadings.edit", "Edit Pleading", PLEADINGS_LOC, pleadings::edit_pleading)
+            .params(
+                r#"{} opens the pleading's form again; or law.pleadings.new's params (firm left out) → {"updated": n, "missing": [field]}: every place New Pleading put a value (names, county, case number, title…) is rewritten from them in one undo step. The type, the parties' number, sides and client or pro se marks, the service method and whether there is a division stay as they are ("Start a new pleading to change this"). Only for a pleading New Pleading wrote"#,
+            )
+            .when(pleadings::edit_enabled),
+        CommandSpec::new("law.pleadings.current", "Pleading Form", PLEADINGS_LOC, pleadings::current)
+            .params(r#"{} → the open pleading's form as law.pleadings.new takes it (firm left out), read back from the document"#)
+            .pure(),
+        CommandSpec::new("law.courts.list", "Saved Courts", PLEADINGS_LOC, courts::list_cmd)
+            .params(r#"{} → [{"id", "name", "courtType", "county", "state", "division"?, "profile"}], by name"#)
+            .pure(),
+        CommandSpec::new("law.courts.save", "Save Court", PLEADINGS_LOC, courts::save_cmd)
+            .params(r#"{"id"?: string (replace that court), "name": string, "courtType": string, "county": string, "division"?: string, "state"?: string (MISSOURI), "profile"?: court profile id (missouri-circuit-court)} → the court as saved; without an id a court of the same name is replaced, else one is added (at most 500; values at most 200 characters)"#)
+            .pure(),
+        CommandSpec::new("law.courts.delete", "Delete Saved Court", PLEADINGS_LOC, courts::delete_cmd).params(r#"{"id": string} → {"deleted": id}"#).pure(),
+        CommandSpec::new("law.contacts.read", "Read Contacts", PLEADINGS_LOC, contacts::read_cmd)
+            .params(r#"{"path": string (.vcf, at most 1 MB and 1,000 contacts)} → [{"name", "organization", "address" (lines), "email", "phone"}]; nothing is kept"#)
+            .pure(),
         CommandSpec::new("law.pleadingPaper.apply", "Pleading Paper", PLEADINGS_LOC, pleading_paper::apply_cmd).params(
             r#"{"lines"?: 10–50 (28), "spacing"?: pt 12–36 (24), "start"?: pt below the top margin (0), "numberFont"?: string, "numberSize"?: pt (12), "numberGap"?: pt (8), "leftRule"?: "double|single|none", "rightRule"?: "single|none", "ruleGap"?: pt (4), "ruleWidth"?: pt (0.75), "enabled"?: bool} → the settings applied: numbered lines down the left margin of every page and rules beside the text, in the page headers; replaces any LawCraft pleading paper already there"#,
         ),

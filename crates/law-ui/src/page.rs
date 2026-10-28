@@ -48,6 +48,8 @@ pub struct LawUi {
     pub firm_dirty: bool,
     /// Why the options page's firm details couldn't be saved.
     pub firm_message: Option<String>,
+    /// A saved court being renamed on the options page: (id, name as typed).
+    pub court_rename: Option<(String, String)>,
 }
 
 /// After selecting or importing a profile, keep `doc_type` on a key that exists in `docs`.
@@ -302,6 +304,8 @@ pub fn page(app: &mut Ctx<'_>, ui: &mut Ui) {
     });
     ui.add_space(16.0);
     crate::pleading::firm_section(app, ui);
+    ui.add_space(16.0);
+    crate::pleading::courts_section(app, ui);
 }
 
 /// The editor for one court profile: its name, approval, document types, sections, styles and checks.
@@ -956,6 +960,7 @@ pub(crate) fn finish_pick(app: &mut Ctx<'_>, tag: &str, picked: Option<String>) 
             }
             r
         }
+        "contacts" => crate::pleading::contacts_picked(app, picked),
         _ => Err("not a LawCraft file pick".into()),
     }
 }

@@ -58,6 +58,10 @@ dictionary lives beside), one file per profile.
 | `law.appendix.create` | `{"id"?}`: open a new appendix document formatted by the profile, its pages numbered A1, A2… (federal addenda: Add. 1…) |
 | `law.appendix.apply` | `{"id"?, "doc"?}`: apply the appendix formatting to the open document |
 | `law.pleadings.new` | `{}` opens the New Pleading dialog; with params, writes a Missouri circuit court filing skeleton into a blank document (see [Pleadings](#pleadings)) |
+| `law.pleadings.edit` | `{}` reopens the pleading's form; with params, rewrites every value New Pleading put in the document (see [Edit Pleading](#edit-pleading)) |
+| `law.pleadings.current` | `{}`: the open pleading's form, read back from the document |
+| `law.courts.list` / `save` / `delete` | The saved courts New Pleading offers (see [Saved courts](#saved-courts)) |
+| `law.contacts.read` | `{"path"}`: the contacts in a .vcf file (see [Contacts](#contacts)) |
 | `law.firm.get` | `{}`: the saved firm details, or `{}` |
 | `law.firm.set` | The firm details (see [Pleadings](#pleadings)): checked and saved, replacing what was saved |
 
@@ -237,6 +241,75 @@ court profiles folder; that file is not a profile and the profile loader skips i
 and values over 200 characters are refused. They are never written into a document's properties
 and never sent anywhere.
 
+### Edit Pleading
+
+Edit Pleading requested by Patrick Nolan.
+
+Every place New Pleading writes a value from the form goes into a plain-text content control (the
+kind Word uses, so Word keeps them) tagged `law:<field>`, with a suffix when the text is a variant
+of the value: `law:s1.name.0:up` is the first party's name in capitals in the caption,
+`law:s1.name.0` the same name as typed in the COMES NOW sentence. The fields are `title`,
+`courtType`, `county`, `division`, `caseNumber`, `s1.name.N` and `s2.name.N` (one per party),
+`s1.role` and `s2.role`, `s1.address.N` (a pro se party's mailing address), `served.name` and
+`served.address`, and `date`; the variants are `up` (capitals), `tc` (title case), `long` (the
+long date), `side` and `clients` (the role, plural for the side's parties or for the clients).
+Each control keeps the value as typed in its title. The controls can't be deleted by accident
+but can be typed in. One function gives the text for a tag, so writing and editing case a name
+the same way.
+
+The pleading's shape goes into one custom document property, `LawCraft pleading`:
+`{"schema": 1, "type", "sides": ["c", "np"], "service", "verified", "division"}`, a letter per
+party (`c` our client, `p` pro se, `n` neither). It holds no names, addresses or firm details.
+
+- `law.pleadings.edit` with `{}` opens the form filled from the document (`ui_requests` entry
+  `{"addin": "law", "open": "editPleading"}`). With params (as `law.pleadings.new` takes them;
+  `firm` is ignored), it rewrites every tagged control from them and sets the Title property to
+  the title, in **one undo step**, returning `{"updated": n, "missing": [field]}`. The person's
+  own text outside the controls stays.
+- It changes text only. A different type, number of parties, side, client or pro se mark,
+  service method, verification or division line fails with "Start a new pleading to change
+  this".
+- On a document without the property the command is greyed out and fails with "This pleading was
+  made before Edit Pleading. Use Find and Replace (Ctrl+H)."
+- `law.pleadings.current` returns the form as `law.pleadings.new` takes it: each value is the text
+  of its first as-typed control (what a person may have corrected by hand), else the title of its
+  first control.
+
+### Saved courts
+
+Saved courts requested by Patrick Nolan.
+
+A court is saved once and picked from a list. `law.courts.save` takes `{"id"?, "name",
+"courtType", "county", "division"?, "state"?, "profile"?}` (state `MISSOURI` and profile
+`missouri-circuit-court` by default) and returns the court with its `id`, made from the name. With
+an `id` it replaces that court; without one, a court of the same name is replaced, else one is
+added. Values are at most 200 characters, unknown fields are refused, and the list holds at most
+500 courts. `law.courts.list` returns them by name and `law.courts.delete {"id"}` removes one.
+They are kept in `courts.json` (`{"schema": 1, "courts": […]}`) beside `firm.json`; the profile
+loader skips it.
+
+`law.pleadings.new` and `law.pleadings.edit` take `"court": id`, which fills `courtType`, `county`
+and `division` (values given as well win), and `"saveCourt": name`, which saves the form's court
+under that name. A `division` puts a `Division: X` line under the case number in the caption;
+without one the caption is as before. The New Pleading form has a **Saved court** list and a
+**Save this court** box, and File › Options › LawCraft lists the saved courts with Rename and
+Delete.
+
+LawCraft keeps a small list of courts, not a contact list: judges, clerks and opposing counsel
+stay in the programs that already hold them.
+
+### Contacts
+
+`law.contacts.read {"path"}` reads a vCard file (.vcf) as Outlook, Google Contacts, Apple
+Contacts, Clio and MyCase export them, and returns `[{"name", "organization", "address", "email",
+"phone"}]`. It reads vCard 3.0 and 4.0: `FN` (or `N` when there is no `FN`), `ORG`, the first
+`ADR` (a work or preferred one wins), `EMAIL` and `TEL`, with folded lines and several cards in a
+file; a card with no name takes its organization's, and one with neither is left out. Files over
+1 MB or with more than 1,000 cards are refused. Under MCP or a confined agent session it reads only
+within the automation read roots. Nothing is kept. In New Pleading and Edit Pleading each party has
+**From contacts…**: pick a .vcf, pick a contact when the file has several, and the name and mailing
+address fill in.
+
 ## Pleading paper
 
 Pleading paper by Patrick Nolan, reported by David Seto.
@@ -295,6 +368,7 @@ without pleading paper, or with fewer than `limit` numbers per vertical inch (de
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-28 | minor | Edit Pleading and saved courts requested by Patrick Nolan: New Pleading tags its values in content controls and records the pleading's shape, `law.pleadings.edit` and `law.pleadings.current` and Law › Edit Pleading, `law.courts.list`/`save`/`delete` with a division line in the caption, and `law.contacts.read` for .vcf contacts |
 | 2026-10-28 | minor | Pleading paper by Patrick Nolan, reported by David Seto: `law.pleadingPaper.apply`/`remove`/`get`/`toggle` and Law › Pleading Paper, a `pleadingPaper` profile block and check, a `footerTitle` block, and the bundled `california-superior-court` profile |
 | 2026-10-15 | minor | Pleadings: bundled `missouri-circuit-court` profile (motion, notice, answer, petition), `law.pleadings.new` writes the filing skeleton, `law.firm.get`/`law.firm.set` keep the firm details, and a section may be found by its style (`matchStyle`) |
 | 2026-10-14 | minor | Legal spell-check supplement (`law.words.list`) and confusion-pair proofing (`law.proof.confusions`) hooked into WordCraft's English proofing when LawCraft is on |

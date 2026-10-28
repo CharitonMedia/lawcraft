@@ -3,7 +3,8 @@
 //! A profile is a file, `<id>.json` in the profiles folder, so a person can hand one around and
 //! an agent can write one. The store keeps the bundled profiles (Missouri and federal appellate
 //! briefs, Missouri circuit court pleadings) and the user's; a user's own profile wins over a
-//! bundled one of the same id. The firm details pleadings use (`firm.json`) live in the same folder.
+//! bundled one of the same id. The firm details pleadings use (`firm.json`) and the saved courts
+//! (`courts.json`) live in the same folder.
 //!
 //! Saving always clears the verified flag: only a person's `law.profiles.approve` sets it.
 
@@ -53,19 +54,21 @@ pub struct Store {
     user: BTreeMap<String, Profile>,
     /// The saved firm details for pleadings (`firm.json` in the same folder), by field.
     firm: BTreeMap<String, String>,
+    /// The saved courts (`courts.json` in the same folder).
+    courts: Vec<crate::courts::Court>,
 }
 
 impl Default for Store {
     /// A store with the bundled profiles that keeps the user's in memory only.
     fn default() -> Self {
-        Store { bundled: bundled(), dir: None, user: BTreeMap::new(), firm: BTreeMap::new() }
+        Store { bundled: bundled(), dir: None, user: BTreeMap::new(), firm: BTreeMap::new(), courts: Vec::new() }
     }
 }
 
 impl Store {
     /// A store over `dir` (the user's profiles folder), or one that keeps profiles in memory only.
     pub fn new(dir: Option<PathBuf>) -> Self {
-        let mut store = Store { bundled: bundled(), dir, user: BTreeMap::new(), firm: BTreeMap::new() };
+        let mut store = Store { bundled: bundled(), dir, user: BTreeMap::new(), firm: BTreeMap::new(), courts: Vec::new() };
         store.load_dir();
         store
     }
@@ -78,6 +81,7 @@ impl Store {
         self.dir = dir;
         self.user.clear();
         self.firm.clear();
+        self.courts.clear();
         self.load_dir();
     }
 
@@ -167,6 +171,10 @@ impl Store {
             let firm = paths.remove(i);
             self.load_firm(&firm);
         }
+        if let Some(i) = paths.iter().position(|p| p.file_name().is_some_and(|n| n == COURTS_FILE)) {
+            let courts = paths.remove(i);
+            self.load_courts(&courts);
+        }
         for path in paths {
             if let Ok(p) = Self::read_file(&path) {
                 self.user.insert(p.id.clone(), p);
@@ -179,6 +187,8 @@ impl Store {
 
 /// The firm details file in the profiles folder.
 const FIRM_FILE: &str = "firm.json";
+/// The saved courts file in the profiles folder.
+const COURTS_FILE: &str = "courts.json";
 
 impl Store {
     /// The saved firm details (empty when none are saved).
@@ -195,6 +205,35 @@ impl Store {
         }
         self.firm = firm;
         Ok(())
+    }
+
+    /// The saved courts, in the order they were saved.
+    pub fn courts(&self) -> &[crate::courts::Court] {
+        &self.courts
+    }
+
+    /// Replace the saved courts. Writes `courts.json` when the store has a folder; they stay in
+    /// memory either way. The caller has checked them ([`crate::courts`]).
+    pub fn set_courts(&mut self, courts: Vec<crate::courts::Court>) -> Result<(), LawError> {
+        if let Some(dir) = &self.dir {
+            let text = serde_json::to_string_pretty(&serde_json::json!({"schema": 1, "courts": courts})).map_err(|e| LawError::Io(e.to_string()))?;
+            write_file(&dir.join(COURTS_FILE), &text)?;
+        }
+        self.courts = courts;
+        Ok(())
+    }
+
+    /// Load the saved courts from `path`, ignoring a file that isn't valid.
+    fn load_courts(&mut self, path: &Path) {
+        let courts = read_file(path)
+            .ok()
+            .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+            .and_then(|v| serde_json::from_value::<Vec<crate::courts::Court>>(v.get("courts")?.clone()).ok())
+            .filter(|c| c.len() <= crate::courts::MAX_COURTS && c.iter().all(|c| c.check().is_ok()));
+        match courts {
+            Some(c) => self.courts = c,
+            None => log::warn!("saved courts: ignoring {} (not a valid court list)", path.display()),
+        }
     }
 
     /// Load the saved firm details from `path`, ignoring a file that isn't valid.

@@ -317,7 +317,11 @@ fn the_law_tab_holds_the_symbols_while_lawcraft_is_on() {
     let mut s = law();
     let tab = s.ribbon.tabs().iter().find(|t| t.name == crate::RIBBON_TAB).cloned().expect("the Law tab");
     assert!(tab.custom && !tab.hidden);
-    assert_eq!(tab.groups[0].commands, ["law.pleadings.new", "law.pleadingPaper.toggle"], "New Pleading and Pleading Paper lead the Law tab");
+    assert_eq!(
+        tab.groups[0].commands,
+        ["law.pleadings.new", "law.pleadings.edit", "law.pleadingPaper.toggle"],
+        "New Pleading, Edit Pleading and Pleading Paper lead the Law tab"
+    );
     let symbols = tab.groups.iter().find(|g| g.name == "Legal Symbols").expect("symbols group");
     assert_eq!(symbols.commands, PALETTE.iter().map(|e| e.command).collect::<Vec<_>>());
     assert!(serde_json::to_value(&s.ribbon).unwrap().get("tabs").is_none(), "the tab isn't saved with the user's layout");

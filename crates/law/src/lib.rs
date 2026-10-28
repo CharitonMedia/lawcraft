@@ -44,6 +44,8 @@ pub mod checks;
 pub mod citation_pack;
 pub mod citations;
 pub mod cmd;
+pub mod contacts;
+pub mod courts;
 pub mod footer_title;
 pub mod pleading_paper;
 pub mod pleadings;
@@ -74,7 +76,7 @@ pub fn specs() -> Vec<wordcraft_engine::CommandSpec> {
 pub fn ribbon_groups() -> Vec<wordcraft_engine::ribbon::CustomGroup> {
     let mut groups = vec![wordcraft_engine::ribbon::CustomGroup {
         name: "Pleadings".into(),
-        commands: vec!["law.pleadings.new".into(), "law.pleadingPaper.toggle".into()],
+        commands: vec!["law.pleadings.new".into(), "law.pleadings.edit".into(), "law.pleadingPaper.toggle".into()],
     }];
     groups.extend(symbols::ribbon_groups());
     groups
@@ -140,3 +142,6 @@ mod tests_pleadings;
 
 #[cfg(test)]
 mod tests_pleading_paper;
+
+#[cfg(test)]
+mod tests_edit_pleading;

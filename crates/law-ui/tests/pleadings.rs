@@ -189,3 +189,99 @@ fn unsaved_work_stays_open_beside_the_new_pleading() {
     assert!(a.session.dirty);
     assert_eq!(body(a).trim(), "Unsaved work");
 }
+
+fn params(client: &str) -> serde_json::Value {
+    json!({
+        "type": "motion", "title": "Motion to Continue", "county": "ADAIR", "caseNumber": "26AR-DR00012",
+        "firstSide": {"names": [{"name": client, "client": true}], "role": "Petitioner"},
+        "secondSide": {"names": ["John Doe"], "role": "Respondent"},
+        "filingDate": "2026-10-28",
+        "firm": {"firmName": "Nolan Law Firm LLC", "address1": "101 Main St", "city": "Kirksville", "state": "MO", "zip": "63501",
+            "phone": "660-555-0100", "email": "office@example.com", "attorneyName": "Pat Nolan", "barNumber": "12345"},
+    })
+}
+
+/// Edit Pleading opens the form filled from the document; Update fixes the name everywhere.
+#[test]
+fn edit_pleading_reopens_the_form_and_fixes_a_misspelled_name() {
+    let _lock = serial();
+    let mut a = law_app();
+    a.run("law.pleadings.new", params("Jane Deo")).unwrap();
+    a.run("law.pleadings.edit", json!({})).unwrap();
+    assert!(is_open(&a));
+    let mut h = harness(a);
+    h.run_steps(4);
+    assert!(h.query_by_label("Update").is_some() && h.query_by_label("Create").is_none());
+    let f = form(h.state_mut());
+    assert!(f.edit);
+    assert_eq!(f.first.parties[0].name, "Jane Deo");
+    assert_eq!(f.second.parties[0].name, "John Doe", "a name only in capitals comes back as typed");
+    assert_eq!(f.case_number, "26AR-DR00012");
+    f.first.parties[0].name = "Jane Doe".into();
+    h.run_steps(2);
+    h.get_by_label("Update").click();
+    h.run_steps(4);
+    let a = h.state_mut();
+    assert!(!is_open(a), "{:?}", a.addin::<LawAddIn>(MODULE).unwrap().state.pleading.as_ref().map(|f| &f.error));
+    let text = body(a);
+    assert!(text.contains("JANE DOE") && !text.contains("DEO") && !text.contains("Deo"), "{text}");
+}
+
+/// A saved court is offered and fills the court fields; Save this court saves one.
+#[test]
+fn saved_courts_fill_the_form_and_save_this_court_saves_one() {
+    let _lock = serial();
+    let mut a = law_app();
+    let court =
+        a.run("law.courts.save", json!({"name": "Adair County Circuit", "courtType": "CIRCUIT", "county": "ADAIR", "division": "II"})).unwrap();
+    a.run("law.pleadings.new", json!({})).unwrap();
+    let mut h = harness(a);
+    h.run_steps(4);
+    assert!(h.query_by_label("Saved court").is_some());
+    let f = form(h.state_mut());
+    assert_eq!(f.courts.len(), 1);
+    f.use_court(&court);
+    assert_eq!((f.court_type.as_str(), f.county.as_str(), f.division.as_str()), ("CIRCUIT", "ADAIR", "II"));
+    f.county = "MACON".into();
+    f.save_court = true;
+    f.court_name = f.default_court_name();
+    assert_eq!(f.court_name, "Macon County Circuit");
+    assert_eq!(f.params()["saveCourt"], "Macon County Circuit");
+    assert_eq!(f.params()["division"], "II");
+    fill(f);
+    f.county = "MACON".into();
+    h.run_steps(2);
+    h.get_by_label("Create").click();
+    h.run_steps(4);
+    let a = h.state_mut();
+    assert!(body(a).contains("Division: II"));
+    let names: Vec<String> =
+        a.run("law.courts.list", json!({})).unwrap().as_array().unwrap().iter().map(|c| c["name"].as_str().unwrap().to_string()).collect();
+    assert_eq!(names, ["Adair County Circuit", "Macon County Circuit"]);
+}
+
+/// From contacts… fills a party's name and mailing address from a .vcf file.
+#[test]
+fn from_contacts_fills_a_party() {
+    let _lock = serial();
+    let dir = std::env::temp_dir().join(format!("wc-ui-law-vcf-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("one.vcf");
+    std::fs::write(&path, "BEGIN:VCARD\r\nVERSION:4.0\r\nFN:Mary Roe\r\nADR:;;12 Oak St;Kirksville;MO;63501;\r\nEND:VCARD\r\n").unwrap();
+    let picked = path.to_str().unwrap().to_string();
+    let mut s = Session::new(Document::new());
+    s.prefs.modules.insert(MODULE.into(), true);
+    let mut a = WordApp::new(s, Services { pick_open: Some(Box::new(move |_| Some(picked.clone()))), ..Default::default() });
+    a.add_addin(Box::new(LawAddIn::default()));
+    a.run("law.pleadings.new", json!({})).unwrap();
+    let mut h = harness(a);
+    h.run_steps(4);
+    form(h.state_mut()).second.parties[0].pro_se = true;
+    h.run_steps(2);
+    h.get_all_by_label("From contacts…").nth(1).expect("the second side's button").click();
+    h.run_steps(4);
+    let f = form(h.state_mut());
+    assert_eq!(f.second.parties[0].name, "Mary Roe");
+    assert_eq!(f.second.parties[0].address, "12 Oak St\nKirksville, MO 63501");
+    let _ = std::fs::remove_dir_all(&dir);
+}

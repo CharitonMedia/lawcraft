@@ -103,7 +103,12 @@ impl AddIn for LawAddIn {
 
     /// New Pleading run without parameters opens its window instead.
     fn input_dialog(&self, id: &str, params: &Value) -> Option<&'static str> {
-        (id == "law.pleadings.new" && params.as_object().is_none_or(|p| p.is_empty())).then_some("newPleading")
+        let empty = params.as_object().is_none_or(|p| p.is_empty());
+        match id {
+            "law.pleadings.new" if empty => Some("newPleading"),
+            "law.pleadings.edit" if empty => Some("editPleading"),
+            _ => None,
+        }
     }
 
     /// Draw the New Pleading window while it is open.

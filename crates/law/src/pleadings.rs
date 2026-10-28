@@ -10,10 +10,18 @@
 //! before a signature line, list numbering) are set on the paragraph.
 //!
 //! The text is the firm's own pleading wording, in English: it is legal text, not interface.
+//!
+//! Every place a form value lands (a name, the county, the title…) goes into a plain-text
+//! content control tagged `law:<field>[:<variant>]`, holding the value as typed in its title,
+//! and the pleading's shape (type, which parties are clients or pro se, service) goes into the
+//! `LawCraft pleading` custom property, with no names in it. `law.pleadings.edit` reads both back
+//! to reopen the form, and rewrites every tagged control from the corrected values in one undo
+//! step; [`field_text`] gives the text for a tag both times, so a name is cased the same way.
 
 use std::collections::BTreeMap;
 
 use serde_json::{Value, json};
+use wordcraft_doc::control::ControlRange;
 use wordcraft_doc::{Document, Path, Pos, StoryRef};
 use wordcraft_engine::cmd::{civil_from_days, now_unix, pos_json};
 use wordcraft_engine::{CmdError, CmdResult, Session};
@@ -50,6 +58,15 @@ const MAX_FIRM_VALUE: usize = 200;
 const MAX_TEXT: usize = 1000;
 /// Most names on one side of the caption.
 const MAX_NAMES: usize = 20;
+
+/// The custom document property that marks a pleading New Pleading wrote, and holds its shape.
+pub const PROPERTY: &str = "LawCraft pleading";
+/// What Edit Pleading says about a document New Pleading didn't write.
+pub const NOT_EDITABLE: &str = "This pleading was made before Edit Pleading. Use Find and Replace (Ctrl+H).";
+/// What Edit Pleading says when the change needs different paragraphs, not different words.
+pub const STRUCTURE: &str = "Start a new pleading to change this";
+/// The tag prefix of LawCraft's content controls.
+pub const TAG: &str = "law:";
 
 /// Check a firm block: an object of the known fields only, each a string of at most 200
 /// characters. Empty values are left out.
@@ -95,7 +112,7 @@ pub fn new_pleading(s: &mut Session, v: &Value) -> CmdResult {
         s.ui_requests.push(json!({"addin": crate::MODULE, "open": "newPleading"}));
         return Ok(json!({"pending": "newPleading"}));
     }
-    let form = Form::read(v)?;
+    let form = Form::read(v, true)?;
     // Before the profile goes on: its page-number footer isn't the person's text.
     if !is_blank(&s.doc) {
         return Err(CmdError::Params(NOT_BLANK.into()));
@@ -103,10 +120,161 @@ pub fn new_pleading(s: &mut Session, v: &Value) -> CmdResult {
     let Some(profile) = store().get(PROFILE).cloned() else { return Err(CmdError::Failed(format!("no court profile `{PROFILE}`"))) };
     crate::apply::apply(s, &profile, form.kind).map_err(|e| CmdError::Failed(e.to_string()))?;
     let sections = Writer { s, started: false, lists: Vec::new() }.write(&form)?;
-    // File › Properties › Title: what a `TITLE` field in the footer shows (California's footer).
+    // File › Properties › Title: what a `TITLE` field in the footer shows (California's footer),
+    // and the pleading's shape for Edit Pleading.
+    s.join_next_undo();
+    s.run("file.properties", &json!({"title": form.title, "custom": {PROPERTY: form.shape().to_string()}}))?;
+    let mut out = json!({"profile": PROFILE, "type": form.kind, "sections": sections});
+    save_court(v, &form, &mut out)?;
+    Ok(out)
+}
+
+/// `saveCourt`: save the form's court under that name; the saved court goes in `out.court`.
+fn save_court(v: &Value, form: &Form, out: &mut Value) -> Result<(), CmdError> {
+    let Some(name) = text(v, "saveCourt")? else { return Ok(()) };
+    let court = json!({"name": name, "courtType": form.court_type, "county": form.county, "division": form.division});
+    let saved = crate::courts::save(&court).map_err(CmdError::Params)?;
+    out["court"] = saved;
+    Ok(())
+}
+
+/// Whether the document is a pleading New Pleading wrote (it has the [`PROPERTY`]).
+pub fn is_pleading(doc: &Document) -> bool {
+    shape_of(doc).is_some()
+}
+
+/// The [`PROPERTY`] of the document, parsed.
+fn shape_of(doc: &Document) -> Option<Value> {
+    let p = doc.custom_props.iter().find(|p| p.name.eq_ignore_ascii_case(PROPERTY))?;
+    serde_json::from_str::<Value>(&p.value).ok().filter(|v| v.get("schema").and_then(Value::as_u64) == Some(1))
+}
+
+/// Disabled with [`NOT_EDITABLE`] on a document New Pleading didn't write.
+pub fn edit_enabled(s: &Session) -> Option<&'static str> {
+    if is_pleading(&s.doc) { None } else { Some(NOT_EDITABLE) }
+}
+
+/// LawCraft's tagged controls in the body: (field key with variant, control).
+fn tagged(doc: &Document) -> Vec<(String, ControlRange)> {
+    doc.control_ranges(StoryRef::Body).into_iter().filter_map(|r| Some((r.control.tag.strip_prefix(TAG)?.to_string(), r))).collect()
+}
+
+/// `law.pleadings.edit`: with no params, ask the interface for the form in edit mode; with
+/// params (as `law.pleadings.new` takes them), rewrite every tagged control from them.
+pub fn edit_pleading(s: &mut Session, v: &Value) -> CmdResult {
+    let Some(shape) = shape_of(&s.doc) else { return Err(CmdError::Params(NOT_EDITABLE.into())) };
+    if v.is_null() || v.as_object().is_some_and(|o| o.is_empty()) {
+        s.ui_requests.push(json!({"addin": crate::MODULE, "open": "editPleading"}));
+        return Ok(json!({"pending": "editPleading"}));
+    }
+    let form = Form::read(v, false)?;
+    let new_shape = form.shape();
+    if new_shape != shape {
+        let what = ["type", "sides", "service", "verified", "division"].into_iter().find(|k| new_shape.get(*k) != shape.get(*k)).unwrap_or("type");
+        let what = match what {
+            "type" => "the pleading type",
+            "sides" => "the parties' number, sides or client and pro se marks",
+            "service" => "the service method",
+            "verified" => "the verification",
+            _ => "whether the caption has a division",
+        };
+        return Err(CmdError::Params(format!("{STRUCTURE}: Edit Pleading changes text, not {what}.")));
+    }
+    let mut controls = tagged(&s.doc);
+    // Last first, so earlier offsets in the same paragraph stay put.
+    controls.sort_by(|(_, a), (_, b)| (&b.start.path, b.start.off).cmp(&(&a.start.path, a.start.off)));
+    let mut updated = 0;
+    let mut seen = std::collections::BTreeSet::new();
+    for (key, r) in &controls {
+        let Some(want) = field_text(&form, key) else { continue };
+        seen.insert(key.split_once(':').map_or(key.as_str(), |(b, _)| b).to_string());
+        let raw = raw_value(&form, key).unwrap_or_default();
+        let have = s.doc.control_text(r);
+        if r.control.title != raw {
+            s.join_next_undo();
+            s.run("developer.properties", &json!({"at": pos_json(&r.content_start()), "title": raw}))?;
+        }
+        if have != want {
+            s.join_next_undo();
+            s.run("select.range", &json!({"anchor": pos_json(&r.content_start()), "focus": pos_json(&r.end)}))?;
+            s.join_next_undo();
+            s.run("text.insert", &json!({"text": want, "raw": true}))?;
+            updated += 1;
+        }
+    }
     s.join_next_undo();
     s.run("file.properties", &json!({"title": form.title}))?;
-    Ok(json!({"profile": PROFILE, "type": form.kind, "sections": sections}))
+    let missing: Vec<String> = form.keys().into_iter().filter(|k| !seen.contains(k)).collect();
+    let mut out = json!({"updated": updated, "missing": missing});
+    save_court(v, &form, &mut out)?;
+    Ok(out)
+}
+
+/// `law.pleadings.current`: the form of the pleading in the document, as `law.pleadings.new`
+/// takes it, rebuilt from its [`PROPERTY`] and its tagged controls (`firm` is left out).
+pub fn current(s: &mut Session, _: &Value) -> CmdResult {
+    let Some(shape) = shape_of(&s.doc) else { return Err(CmdError::Params(NOT_EDITABLE.into())) };
+    // Each field's value: the text of its first as-typed control (what a person may have
+    // corrected by hand), else the title of its first control (the value as typed).
+    let mut values: BTreeMap<String, String> = BTreeMap::new();
+    let controls = tagged(&s.doc);
+    for (key, r) in &controls {
+        let base = key.split_once(':').map_or(key.as_str(), |(b, _)| b);
+        values.entry(base.to_string()).or_insert_with(|| r.control.title.clone());
+    }
+    let mut typed = std::collections::BTreeSet::new();
+    for (key, r) in &controls {
+        if key.contains(':') || key == "caseNumber" && r.control.title.is_empty() || !typed.insert(key.clone()) {
+            continue;
+        }
+        let text = s.doc.control_text(r);
+        if !text.is_empty() {
+            values.insert(key.clone(), text);
+        }
+    }
+    let get = |k: &str| values.get(k).cloned().unwrap_or_default();
+    let kind = shape["type"].as_str().unwrap_or("motion").to_string();
+    let mut sides = Vec::new();
+    for (n, marks) in shape["sides"].as_array().cloned().unwrap_or_default().iter().enumerate() {
+        let marks = marks.as_str().unwrap_or("");
+        let names: Vec<Value> = marks
+            .chars()
+            .enumerate()
+            .map(|(i, m)| {
+                let mut o = json!({"name": get(&format!("s{}.name.{i}", n + 1)), "client": m == 'c', "proSe": m == 'p'});
+                if m == 'p' {
+                    o["address"] = json!(get(&format!("s{}.address.{i}", n + 1)));
+                }
+                o
+            })
+            .collect();
+        sides.push(json!({"names": names, "role": get(&format!("s{}.role", n + 1))}));
+    }
+    let case = get("caseNumber");
+    let mut out = json!({
+        "type": kind,
+        "title": get("title"),
+        "courtType": get("courtType"),
+        "county": get("county"),
+        "caseNumber": if case.trim_matches('_').is_empty() { String::new() } else { case },
+        "firstSide": sides.first().cloned().unwrap_or(Value::Null),
+        "secondSide": sides.get(1).cloned().unwrap_or(Value::Null),
+        "verified": shape["verified"].as_bool().unwrap_or(false),
+    });
+    if values.contains_key("division") {
+        out["division"] = json!(get("division"));
+    }
+    if values.contains_key("date") {
+        out["filingDate"] = json!(get("date"));
+    }
+    if kind != "petition" {
+        out["service"] = shape["service"].clone();
+        if shape["service"] == "efileUsps" {
+            out["servedParty"] = json!(get("served.name"));
+            out["servedAddress"] = json!(get("served.address"));
+        }
+    }
+    Ok(out)
 }
 
 /// No text anywhere: one empty body paragraph, no comments, and nothing in the headers,
@@ -142,19 +310,31 @@ impl Side {
     }
 }
 
+/// Someone served by USPS: the field keys of their name and address, and the values.
+struct Mailed {
+    name_key: String,
+    addr_key: String,
+    name: String,
+    address: String,
+}
+
 /// The params, checked.
 struct Form {
     kind: &'static str,
     title: String,
     court_type: String,
     county: String,
+    /// The court's division, a caption line when set.
+    division: String,
     case_number: String,
     first: Side,
     second: Side,
     /// The firm's clients are on the first side.
     client_first: bool,
-    /// The parties served by USPS: name and mailing address.
-    mail: Vec<(String, String)>,
+    /// The parties served by USPS.
+    mail: Vec<Mailed>,
+    /// `service` is efileUsps.
+    usps: bool,
     /// Some party the firm doesn't represent has counsel, served through e-filing.
     counsel: bool,
     date: (i64, u32, u32),
@@ -163,8 +343,9 @@ struct Form {
 }
 
 impl Form {
-    /// Read and check the command's params; the first problem is the error.
-    fn read(v: &Value) -> Result<Form, CmdError> {
+    /// Read and check the command's params; the first problem is the error. `need_firm`: the
+    /// firm details are required (New Pleading signs with them; Edit Pleading leaves them be).
+    fn read(v: &Value, need_firm: bool) -> Result<Form, CmdError> {
         let kind_name = req(v, "type")?;
         let Some(kind) = TYPES.iter().copied().find(|t| *t == kind_name) else {
             return Err(CmdError::Params(format!("`type` must be one of {}", TYPES.join(", "))));
@@ -195,16 +376,24 @@ impl Form {
             }
         };
         let mut mail = Vec::new();
+        let mut usps = false;
         if !petition {
-            for p in first.parties.iter().chain(&second.parties).filter(|p| p.pro_se) {
-                let Some(address) = &p.address else {
-                    return Err(CmdError::Params(format!("`address` is required for pro se party {}", p.name)));
-                };
-                mail.push((p.name.clone(), address.clone()));
+            for (n, side) in [&first, &second].into_iter().enumerate() {
+                for (i, p) in side.parties.iter().enumerate().filter(|(_, p)| p.pro_se) {
+                    let Some(address) = &p.address else {
+                        return Err(CmdError::Params(format!("`address` is required for pro se party {}", p.name)));
+                    };
+                    let (name_key, addr_key) = (format!("s{}.name.{i}", n + 1), format!("s{}.address.{i}", n + 1));
+                    mail.push(Mailed { name_key, addr_key, name: p.name.clone(), address: address.clone() });
+                }
             }
             match text(v, "service")?.as_deref() {
                 None | Some("efileCounsel") => {}
-                Some("efileUsps") => mail.push((req(v, "servedParty")?, req(v, "servedAddress")?)),
+                Some("efileUsps") => {
+                    usps = true;
+                    let (name, address) = (req(v, "servedParty")?, req(v, "servedAddress")?);
+                    mail.push(Mailed { name_key: "served.name".into(), addr_key: "served.address".into(), name, address });
+                }
                 Some(_) => return Err(CmdError::Params("`service` must be efileCounsel or efileUsps".into())),
             }
         }
@@ -223,23 +412,37 @@ impl Form {
             Some(f) if !f.is_null() => firm_fields(f).map_err(|e| CmdError::Params(format!("`firm`: {e}")))?,
             _ => store().firm().clone(),
         };
-        if firm.is_empty() {
-            return Err(CmdError::Params("`firm` is required: no firm details are saved (law.firm.set)".into()));
+        if need_firm {
+            if firm.is_empty() {
+                return Err(CmdError::Params("`firm` is required: no firm details are saved (law.firm.set)".into()));
+            }
+            if let Some((key, _)) = FIRM_FIELDS.iter().find(|(k, needed)| *needed && !firm.contains_key(*k)) {
+                return Err(CmdError::Params(format!("`firm.{key}` is required")));
+            }
         }
-        if let Some((key, _)) = FIRM_FIELDS.iter().find(|(k, needed)| *needed && !firm.contains_key(*k)) {
-            return Err(CmdError::Params(format!("`firm.{key}` is required")));
-        }
+        // A saved court fills the court fields; ones given as well win.
+        let court = match text(v, "court")? {
+            Some(id) => Some(crate::courts::get(&id).ok_or_else(|| CmdError::Params(format!("no saved court `{id}` (law.courts.list)")))?),
+            None => None,
+        };
+        let from_court = |key: &str| court.as_ref().and_then(|c| c.get(key)).and_then(Value::as_str).map(str::to_string).filter(|t| !t.is_empty());
+        let county = match text(v, "county")?.or_else(|| from_court("county")) {
+            Some(c) => c,
+            None => return Err(CmdError::Params("`county` is required".into())),
+        };
         Ok(Form {
             kind,
             title: req(v, "title")?,
-            court_type: text(v, "courtType")?.unwrap_or_else(|| "CIRCUIT".into()),
-            county: req(v, "county")?,
+            court_type: text(v, "courtType")?.or_else(|| from_court("courtType")).unwrap_or_else(|| "CIRCUIT".into()),
+            county,
+            division: text(v, "division")?.or_else(|| from_court("division")).unwrap_or_default(),
             // A petition may be filed before a case number is assigned.
             case_number: if petition { text(v, "caseNumber")?.unwrap_or_default() } else { req(v, "caseNumber")? },
             first,
             second,
             client_first,
             mail,
+            usps,
             counsel,
             date,
             verified,
@@ -257,22 +460,115 @@ impl Form {
         self.client().parties.iter().filter(|p| p.client).map(|p| p.name.clone()).collect()
     }
 
-    /// The clients' role, plural for more than one ("Respondents").
-    fn client_role(&self) -> String {
-        plural_role(&self.client().role, self.clients().len())
-    }
-
-    /// Who the signature block says the firm is attorney for: the role alone when the firm
-    /// represents everyone on its side, else the role and the clients' names.
-    fn for_whom(&self) -> String {
-        let clients = self.clients();
-        if clients.len() == self.client().parties.len() { self.client_role() } else { format!("{} {}", self.client_role(), join_names(&clients)) }
-    }
-
     /// A firm detail by field name, empty when it isn't set.
     fn firm(&self, key: &str) -> &str {
         self.firm.get(key).map(String::as_str).unwrap_or("")
     }
+
+    /// The side `n` (1 or 2).
+    fn side(&self, n: &str) -> Option<&Side> {
+        match n {
+            "s1" => Some(&self.first),
+            "s2" => Some(&self.second),
+            _ => None,
+        }
+    }
+
+    /// The pleading's shape, kept in the [`PROPERTY`]: no names, only what decides which
+    /// paragraphs there are. A side is a letter per party: `c` client, `p` pro se, `n` neither.
+    fn shape(&self) -> Value {
+        let marks = |s: &Side| {
+            s.parties
+                .iter()
+                .map(|p| {
+                    if p.client {
+                        'c'
+                    } else if p.pro_se {
+                        'p'
+                    } else {
+                        'n'
+                    }
+                })
+                .collect::<String>()
+        };
+        let service = if self.kind == "petition" {
+            "none"
+        } else if self.usps {
+            "efileUsps"
+        } else {
+            "efileCounsel"
+        };
+        json!({
+            "schema": 1,
+            "type": self.kind,
+            "sides": [marks(&self.first), marks(&self.second)],
+            "service": service,
+            "verified": self.kind == "petition" && self.verified,
+            "division": !self.division.is_empty(),
+        })
+    }
+
+    /// Every field key (without variant) this form has a value for.
+    fn keys(&self) -> Vec<String> {
+        let mut out: Vec<String> = ["title", "courtType", "county", "caseNumber", "s1.role", "s2.role"].iter().map(|k| k.to_string()).collect();
+        if !self.division.is_empty() {
+            out.push("division".into());
+        }
+        for (n, side) in [("s1", &self.first), ("s2", &self.second)] {
+            for i in 0..side.parties.len() {
+                out.push(format!("{n}.name.{i}"));
+            }
+        }
+        for m in &self.mail {
+            out.push(m.addr_key.clone());
+            if m.name_key == "served.name" {
+                out.push(m.name_key.clone());
+            }
+        }
+        if self.kind != "petition" {
+            out.push("date".into());
+        }
+        out
+    }
+}
+
+/// A field's value as typed, by key (`county`, `s1.name.0`; a variant suffix is ignored):
+/// what a tagged control keeps in its title.
+fn raw_value(f: &Form, key: &str) -> Option<String> {
+    let base = key.split_once(':').map_or(key, |(b, _)| b);
+    let parts: Vec<&str> = base.split('.').collect();
+    Some(match parts.as_slice() {
+        ["title"] => f.title.clone(),
+        ["courtType"] => f.court_type.clone(),
+        ["county"] => f.county.clone(),
+        ["division"] => f.division.clone(),
+        ["caseNumber"] => f.case_number.clone(),
+        ["date"] => format!("{:04}-{:02}-{:02}", f.date.0, f.date.1, f.date.2),
+        [s, "role"] => f.side(s)?.role.clone(),
+        [s, "name", i] => f.side(s)?.parties.get(i.parse::<usize>().ok()?)?.name.clone(),
+        [s, "address", i] => f.side(s)?.parties.get(i.parse::<usize>().ok()?)?.address.clone()?,
+        ["served", "name"] => f.mail.iter().find(|m| m.name_key == "served.name")?.name.clone(),
+        ["served", "address"] => f.mail.iter().find(|m| m.addr_key == "served.address")?.address.clone(),
+        _ => return None,
+    })
+}
+
+/// The text a tagged control holds for a form: the value as typed, or a variant of it — `up`
+/// upper case, `tc` title case, `long` a long date, `side` / `clients` a role made plural for
+/// the side's parties or for the clients. `None` for a key the form has no value for.
+fn field_text(f: &Form, key: &str) -> Option<String> {
+    let raw = raw_value(f, key)?;
+    let (base, variant) = key.split_once(':').unwrap_or((key, ""));
+    Some(match variant {
+        "" if base == "caseNumber" && raw.is_empty() => "____________".into(),
+        "" => raw,
+        "up" => raw.to_uppercase(),
+        "tc" => title_case(&raw),
+        "long" => long_date(f.date),
+        "side" => plural_role(&raw, f.side(base.split('.').next()?)?.parties.len()),
+        "clients" => plural_role(&raw, f.clients().len()),
+        _ => return None,
+    })
 }
 
 /// A text param: `None` when missing, null or empty.
@@ -423,17 +719,90 @@ pub fn title_case(s: &str) -> String {
         .join(" ")
 }
 
+/// A paragraph's text with the spans that hold form values: each becomes a tagged control.
+#[derive(Default)]
+struct Txt {
+    text: String,
+    /// (field key with variant, value as typed, start, end) in bytes of `text`.
+    spans: Vec<(String, String, usize, usize)>,
+}
+
+impl From<&str> for Txt {
+    fn from(t: &str) -> Self {
+        Txt { text: t.to_string(), spans: Vec::new() }
+    }
+}
+
+impl From<String> for Txt {
+    fn from(text: String) -> Self {
+        Txt { text, spans: Vec::new() }
+    }
+}
+
+impl Txt {
+    /// Literal text.
+    fn lit(mut self, t: &str) -> Self {
+        self.text.push_str(t);
+        self
+    }
+
+    /// A form value by field key ([`field_text`]); nothing when the form has none.
+    fn field(mut self, f: &Form, key: &str) -> Self {
+        if let Some(t) = field_text(f, key).filter(|t| !t.is_empty()) {
+            let start = self.text.len();
+            self.text.push_str(&t);
+            self.spans.push((key.to_string(), raw_value(f, key).unwrap_or_default(), start, self.text.len()));
+        }
+        self
+    }
+
+    /// `other` after this text.
+    fn join(mut self, other: Txt) -> Self {
+        let at = self.text.len();
+        self.text.push_str(&other.text);
+        self.spans.extend(other.spans.into_iter().map(|(k, r, a, b)| (k, r, a + at, b + at)));
+        self
+    }
+
+    /// Names joined as [`join_names`] does, each one a field.
+    fn names(mut self, f: &Form, keys: &[String]) -> Self {
+        let n = keys.len();
+        for (i, k) in keys.iter().enumerate() {
+            if i > 0 {
+                self = self.lit(match (n, i + 1 == n) {
+                    (2, _) => " and ",
+                    (_, true) => ", and ",
+                    _ => ", ",
+                });
+            }
+            self = self.field(f, k);
+        }
+        self
+    }
+}
+
+/// The field keys (as typed) of the parties the firm represents.
+fn client_keys(f: &Form) -> Vec<String> {
+    let n = if f.client_first { "s1" } else { "s2" };
+    f.client().parties.iter().enumerate().filter(|(_, p)| p.client).map(|(i, _)| format!("{n}.name.{i}")).collect()
+}
+
+/// The field key of the clients' role, plural for more than one client.
+fn client_role_key(f: &Form) -> &'static str {
+    if f.client_first { "s1.role:clients" } else { "s2.role:clients" }
+}
+
 /// One line of a block that stays on one page: its text and the space before and after it.
 struct Line {
     style: &'static str,
-    text: String,
+    text: Txt,
     before: Option<f32>,
     after: Option<f32>,
     bold: bool,
 }
 
 /// A plain line of `text` in `style`, with no extra spacing and not bold.
-fn line(style: &'static str, text: impl Into<String>) -> Line {
+fn line(style: &'static str, text: impl Into<Txt>) -> Line {
     Line { style, text: text.into(), before: None, after: None, bold: false }
 }
 
@@ -453,18 +822,34 @@ impl Writer<'_> {
         self.s.run(id, &params)
     }
 
-    /// A new paragraph in `style` holding `text`. A paragraph made by splitting the last one
-    /// starts without its direct formatting.
-    fn para(&mut self, style: &str, text: &str) -> Result<(), CmdError> {
+    /// A new paragraph in `style` holding `text`, its form values in tagged controls. A
+    /// paragraph made by splitting the last one starts without its direct formatting.
+    fn para(&mut self, style: &str, text: impl Into<Txt>) -> Result<(), CmdError> {
+        let t: Txt = text.into();
         if self.started {
             self.run("text.insert", json!({"text": "\r", "raw": true}))?;
             self.run("para.reset", json!({}))?;
         }
         self.started = true;
         self.run("para.style", json!({"style": style}))?;
-        if !text.is_empty() {
-            self.run("text.insert", json!({"text": text, "raw": true}))?;
+        if t.text.is_empty() {
+            return Ok(());
         }
+        self.run("text.insert", json!({"text": t.text, "raw": true}))?;
+        if t.spans.is_empty() {
+            return Ok(());
+        }
+        let end = self.s.sel.focus.clone();
+        let base = end.off.saturating_sub(t.text.len());
+        // Last first: wrapping one span moves only what comes after it.
+        for (key, raw, a, b) in t.spans.iter().rev() {
+            let at = |off: usize| pos_json(&Pos { off: base + off, ..end.clone() });
+            self.run("select.range", json!({"anchor": at(*a), "focus": at(*b)}))?;
+            self.run("developer.plainText", json!({"tag": format!("{TAG}{key}"), "title": raw}))?;
+            self.run("developer.properties", json!({"lockDelete": true}))?;
+        }
+        let len = self.s.doc.para_at(&end).map(|p| p.len()).unwrap_or(end.off);
+        self.run("caret.set", json!({"pos": pos_json(&Pos { off: len, ..end })}))?;
         Ok(())
     }
 
@@ -480,8 +865,8 @@ impl Writer<'_> {
     }
 
     /// A Body paragraph whose lead words are bold.
-    fn lead(&mut self, lead: &str, rest: &str) -> Result<(), CmdError> {
-        self.para("Body", &format!("{lead}{rest}"))?;
+    fn lead(&mut self, lead: &str, rest: Txt) -> Result<(), CmdError> {
+        self.para("Body", Txt::from(lead).join(rest))?;
         self.bold_lead(lead.len())
     }
 
@@ -493,17 +878,19 @@ impl Writer<'_> {
     }
 
     /// Lines kept together on one page.
-    fn block(&mut self, lines: &[Line]) -> Result<(), CmdError> {
-        for (i, l) in lines.iter().enumerate() {
-            self.para(l.style, &l.text)?;
+    fn block(&mut self, lines: Vec<Line>) -> Result<(), CmdError> {
+        let n = lines.len();
+        for (i, l) in lines.into_iter().enumerate() {
+            let len = l.text.text.len();
+            self.para(l.style, l.text)?;
             if l.bold {
-                self.bold_lead(l.text.len())?;
+                self.bold_lead(len)?;
             }
             if l.before.is_some() || l.after.is_some() {
                 self.run("para.spacing", json!({"before": l.before, "after": l.after}))?;
             }
             self.run("para.keepLines", json!({"value": true}))?;
-            if i + 1 < lines.len() {
+            if i + 1 < n {
                 self.run("para.keepNext", json!({"value": true}))?;
             }
         }
@@ -515,7 +902,7 @@ impl Writer<'_> {
         let mut sections = Vec::new();
         self.caption(f)?;
         sections.push("caption");
-        self.para("Title", &f.title)?;
+        self.para("Title", Txt::default().field(f, "title"))?;
         sections.push("title");
         self.body(f)?;
         sections.push("body");
@@ -544,7 +931,7 @@ impl Writer<'_> {
 
     /// The court heading and the two-column caption table (parties on the left, case number on the right).
     fn caption(&mut self, f: &Form) -> Result<(), CmdError> {
-        self.para("Court", &format!("IN THE {} COURT OF {} COUNTY", f.court_type, f.county))?;
+        self.para("Court", Txt::from("IN THE ").field(f, "courtType").lit(" COURT OF ").field(f, "county").lit(" COUNTY"))?;
         self.para("Court State", "STATE OF MISSOURI")?;
         // The table goes in before this paragraph, which stays as the empty one after it.
         self.para("Normal", "")?;
@@ -561,11 +948,11 @@ impl Writer<'_> {
         let width = self.s.doc.sections().first().map(|(_, sp)| sp.text_width()).unwrap_or(468.0);
         // Parties: 62% of the text width, 8 pt above and below, 20 pt before the rule.
         self.cell(&cell(0), width * 0.62, [8.0, 0.0, 8.0, 20.0])?;
-        for (side, end) in [(&f.first, ","), (&f.second, ".")] {
-            for p in &side.parties {
-                self.para("Caption", &p.name.to_uppercase())?;
+        for (n, side, end) in [("s1", &f.first, ","), ("s2", &f.second, ".")] {
+            for i in 0..side.parties.len() {
+                self.para("Caption", Txt::default().field(f, &format!("{n}.name.{i}:up")))?;
             }
-            self.para("Caption", &format!("{}{end}", plural_role(&side.role, side.parties.len())))?;
+            self.para("Caption", Txt::default().field(f, &format!("{n}.role:side")).lit(end))?;
             self.run("para.indents", json!({"left": 54}))?;
             if end == "," {
                 self.para("Caption", "v.")?;
@@ -573,10 +960,12 @@ impl Writer<'_> {
                 self.run("para.spacing", json!({"before": 8, "after": 8}))?;
             }
         }
-        // Case number: 38%, 20 pt after the rule.
+        // Case number: 38%, 20 pt after the rule; the division under it when there is one.
         self.cell(&cell(1), width * 0.38, [8.0, 20.0, 8.0, 0.0])?;
-        let case = if f.case_number.is_empty() { "____________" } else { f.case_number.as_str() };
-        self.para("Caption", &format!("Case No. {case}"))?;
+        self.para("Caption", Txt::from("Case No. ").field(f, "caseNumber"))?;
+        if !f.division.is_empty() {
+            self.para("Caption", Txt::from("Division: ").field(f, "division"))?;
+        }
         // The empty Normal paragraph after the table.
         let mut after = table.clone();
         if let Some(last) = after.last_mut() {
@@ -598,42 +987,51 @@ impl Writer<'_> {
 
     /// The opening paragraphs for the pleading's type, with placeholders for what the attorney fills in.
     fn body(&mut self, f: &Form) -> Result<(), CmdError> {
-        let clients = f.clients();
-        let (names, role) = (join_names(&clients), f.client_role());
+        let clients = client_keys(f);
+        let role = client_role_key(f);
         let prays = if clients.len() > 1 { "pray" } else { "prays" };
+        // " Jane Doe, Petitioner, by and through counsel"
+        let comes = || Txt::from(" ").names(f, &clients).lit(", ").field(f, role).lit(", by and through counsel, ");
+        let wherefore = || Txt::from(", ").field(f, role).lit(&format!(" {prays} "));
         match f.kind {
             "notice" => self.lead(
                 "PLEASE TAKE NOTICE",
-                &format!(
-                    " that [motion] will be called up for hearing on [date] at [time], or as soon thereafter as counsel may be heard, before the {} Court of {} County, Missouri.",
-                    title_case(&f.court_type),
-                    title_case(&f.county)
-                ),
+                Txt::from(
+                    " that [motion] will be called up for hearing on [date] at [time], or as soon thereafter as counsel may be heard, before the ",
+                )
+                .field(f, "courtType:tc")
+                .lit(" Court of ")
+                .field(f, "county:tc")
+                .lit(" County, Missouri."),
             ),
             "answer" => {
-                self.lead("COMES NOW", &format!(" {names}, {role}, by and through counsel, and for Answer to the Petition states as follows:"))?;
+                self.lead("COMES NOW", comes().lit("and for Answer to the Petition states as follows:"))?;
                 for n in 1..=3 {
                     self.listed("numbered", &format!("[Response to paragraph {n}.]"))?;
                 }
-                self.lead("WHEREFORE", &format!(", {role} {prays} this Court deny the relief requested in the Petition and grant such other and further relief as the Court deems just and proper."))
+                self.lead(
+                    "WHEREFORE",
+                    wherefore().lit("this Court deny the relief requested in the Petition and grant such other and further relief as the Court deems just and proper."),
+                )
             }
             "petition" => {
-                self.lead("COMES NOW", &format!(" {names}, {role}, by and through counsel, and for {} states as follows:", title_case(&f.title)))?;
+                self.lead("COMES NOW", comes().lit("and for ").field(f, "title:tc").lit(" states as follows:"))?;
                 for _ in 0..3 {
                     self.listed("numbered", "[Allegation.]")?;
                 }
-                self.lead("WHEREFORE", &format!(", {role} {prays} that this Court:"))?;
+                self.lead("WHEREFORE", wherefore().lit("that this Court:"))?;
                 self.listed("lowerLetterDot", "[Relief requested.]")?;
                 self.listed("lowerLetterDot", "Grant such other and further relief as the Court deems just and proper.")
             }
             _ => {
-                self.lead("COMES NOW", &format!(" {names}, {role}, by and through counsel, and in support of this motion states as follows:"))?;
+                self.lead("COMES NOW", comes().lit("and in support of this motion states as follows:"))?;
                 for _ in 0..3 {
                     self.listed("numbered", "[Grounds.]")?;
                 }
                 self.lead(
                     "WHEREFORE",
-                    &format!(", {role} {prays} this Court [state the relief requested] and for such other and further relief as the Court deems just and proper."),
+                    wherefore()
+                        .lit("this Court [state the relief requested] and for such other and further relief as the Court deems just and proper."),
                 )
             }
         }
@@ -641,48 +1039,52 @@ impl Writer<'_> {
 
     /// The signature block from the saved firm details.
     fn signature(&mut self, f: &Form) -> Result<(), CmdError> {
-        let sig = |text: String| line("Signature", text);
-        let mut lines = vec![sig("Respectfully Submitted,".into()), Line { before: Some(6.0), ..sig(f.firm("firmName").into()) }];
-        lines.push(sig(f.firm("address1").into()));
+        let sig = |text: Txt| line("Signature", text);
+        let firm = |k: &str| Txt::from(f.firm(k));
+        let mut lines = vec![sig("Respectfully Submitted,".into()), Line { before: Some(6.0), ..sig(firm("firmName")) }];
+        lines.push(sig(firm("address1")));
         if !f.firm("address2").is_empty() {
-            lines.push(sig(f.firm("address2").into()));
+            lines.push(sig(firm("address2")));
         }
-        lines.push(sig(format!("{}, {} {}", f.firm("city"), f.firm("state"), f.firm("zip"))));
-        lines.push(sig(format!("{} - ph", f.firm("phone"))));
+        lines.push(sig(format!("{}, {} {}", f.firm("city"), f.firm("state"), f.firm("zip")).into()));
+        lines.push(sig(format!("{} - ph", f.firm("phone")).into()));
         if !f.firm("fax").is_empty() {
-            lines.push(sig(format!("{} - fax", f.firm("fax"))));
+            lines.push(sig(format!("{} - fax", f.firm("fax")).into()));
         }
-        lines.push(sig(f.firm("email").into()));
-        lines.push(Line { before: Some(12.0), after: Some(12.0), ..sig(format!("Attorney for {}", f.for_whom())) });
-        lines.push(Line { before: Some(18.0), ..sig(format!("By: /s/ {}", f.firm("attorneyName"))) });
-        lines.push(sig(format!("{}, MO Bar No. {}", f.firm("attorneyName"), f.firm("barNumber"))));
-        self.block(&lines)
+        lines.push(sig(firm("email")));
+        // "Attorney for Petitioner", or with the clients' names when the firm represents only
+        // some of its side.
+        let mut whom = Txt::from("Attorney for ").field(f, client_role_key(f));
+        let clients = client_keys(f);
+        if clients.len() != f.client().parties.len() {
+            whom = whom.lit(" ").names(f, &clients);
+        }
+        lines.push(Line { before: Some(12.0), after: Some(12.0), ..sig(whom) });
+        lines.push(Line { before: Some(18.0), ..sig(format!("By: /s/ {}", f.firm("attorneyName")).into()) });
+        lines.push(sig(format!("{}, MO Bar No. {}", f.firm("attorneyName"), f.firm("barNumber")).into()));
+        self.block(lines)
     }
 
     /// The certificate of service: e-filing to counsel of record, and USPS to each pro se party.
     fn certificate(&mut self, f: &Form) -> Result<(), CmdError> {
-        let date = long_date(f.date);
-        let mut said = String::new();
+        let mut said = Txt::default();
+        let on_date = || Txt::from("I hereby certify that on this ").field(f, "date:long");
         if f.counsel || f.mail.is_empty() {
-            said = format!(
-                "I hereby certify that on this {date}, an electronic copy of the foregoing was sent through the Missouri e-Filing system to counsel of record."
-            );
+            said = on_date().lit(", an electronic copy of the foregoing was sent through the Missouri e-Filing system to counsel of record.");
         }
-        for (party, address) in &f.mail {
-            if said.is_empty() {
-                said = format!(
-                    "I hereby certify that on this {date}, a copy of this {} was sent to {party} postage pre-paid via USPS to last known address of {address}.",
-                    f.title
-                );
-            } else {
-                said.push_str(&format!(
-                    " A copy of this {} was sent to {party} postage pre-paid via USPS to last known address of {address}, on today's date.",
-                    f.title
-                ));
-            }
+        for m in &f.mail {
+            let first = said.text.is_empty();
+            said = if first { on_date().lit(", a copy of this ") } else { said.lit(" A copy of this ") };
+            said = said
+                .field(f, "title")
+                .lit(" was sent to ")
+                .field(f, &m.name_key)
+                .lit(" postage pre-paid via USPS to last known address of ")
+                .field(f, &m.addr_key)
+                .lit(if first { "." } else { ", on today's date." });
         }
         let attorney = f.firm("attorneyName");
-        self.block(&[
+        self.block(vec![
             line("Certificate Heading", "Certificate of Service"),
             line("Certificate", said),
             Line { before: Some(18.0), ..line("Certificate", format!("/s/ {attorney}")) },
@@ -692,18 +1094,20 @@ impl Writer<'_> {
 
     /// The client's verification of a petition, with its notary block.
     fn verification(&mut self, f: &Form) -> Result<(), CmdError> {
-        let names = join_names(&f.clients());
+        let clients = client_keys(f);
         let rule = "___________________________";
-        self.block(&[
+        self.block(vec![
             Line { bold: true, ..line("Certificate", "VERIFICATION") },
             line(
                 "Certificate",
-                format!("The undersigned, {names}, states that the facts set forth in the foregoing Petition are true and correct to the best of my knowledge and belief."),
+                Txt::from("The undersigned, ")
+                    .names(f, &clients)
+                    .lit(", states that the facts set forth in the foregoing Petition are true and correct to the best of my knowledge and belief."),
             ),
             Line { before: Some(18.0), ..line("Certificate", rule) },
-            line("Certificate", format!("{names}, {}", f.client_role())),
+            line("Certificate", Txt::default().names(f, &clients).lit(", ").field(f, client_role_key(f))),
             line("Certificate", "State of Missouri"),
-            line("Certificate", format!("County of {}", title_case(&f.county))),
+            line("Certificate", Txt::from("County of ").field(f, "county:tc")),
             line("Certificate", "Subscribed and sworn to before me this _______ day of _____________, 20_____."),
             Line { before: Some(18.0), ..line("Certificate", rule) },
             line("Certificate", "Notary Public"),

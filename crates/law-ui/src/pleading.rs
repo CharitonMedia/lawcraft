@@ -1,11 +1,16 @@
-//! The New Pleading window (`law.pleadings.new` with no params asks for it) and the firm details
-//! it shares with File › Options › LawCraft. English only, like the options page.
+//! The New Pleading window (`law.pleadings.new` with no params asks for it), the same form as
+//! Edit Pleading (`law.pleadings.edit` with no params), and what it shares with File › Options ›
+//! LawCraft: the firm details and the saved courts. English only, like the options page.
 
 use egui::{RichText, Ui};
 use serde_json::{Map, Value, json};
+use wordcraft_ui_egui::file_dialogs::FileDialogRequest;
 use wordcraft_ui_egui::theme::semibold;
 
 use crate::Ctx;
+
+/// What Edit Pleading says beside what it can't change.
+const STRUCTURE: &str = "Start a new pleading to change this.";
 
 /// The error `law.pleadings.new` gives on a document that isn't blank: the window then runs File ›
 /// New first, as the File menu does.
@@ -105,6 +110,25 @@ impl SideForm {
         Self { parties: vec![PartyRow { client, ..Default::default() }], role: role.into(), other: false }
     }
 
+    /// A side from `law.pleadings.current`, its role picked from `roles` when it is one of them.
+    fn from_json(v: &Value, roles: &[&str]) -> Self {
+        let role = v["role"].as_str().unwrap_or("").to_string();
+        let parties = v["names"]
+            .as_array()
+            .map(|a| {
+                a.iter()
+                    .map(|p| PartyRow {
+                        name: p["name"].as_str().unwrap_or("").to_string(),
+                        client: p["client"].as_bool().unwrap_or(false),
+                        pro_se: p["proSe"].as_bool().unwrap_or(false),
+                        address: p["address"].as_str().unwrap_or("").to_string(),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        Self { parties, other: !roles.contains(&role.as_str()), role }
+    }
+
     /// The parties with a name.
     fn filled(&self) -> impl Iterator<Item = &PartyRow> {
         self.parties.iter().filter(|p| !p.name.trim().is_empty())
@@ -136,6 +160,8 @@ pub struct PleadingForm {
     pub title: String,
     pub court_type: String,
     pub county: String,
+    /// The caption's division line; empty for none.
+    pub division: String,
     pub case_number: String,
     pub first: SideForm,
     pub second: SideForm,
@@ -143,16 +169,34 @@ pub struct PleadingForm {
     pub filing_date: String,
     /// Petition only.
     pub verified: bool,
+    /// Edit mode, a pleading served by USPS on a party not in the caption: their name and
+    /// address (`servedParty`, `servedAddress`).
+    pub served: Option<(String, String)>,
     pub firm: Firm,
     pub remember_firm: bool,
     /// Firm details were saved already (their section starts closed).
     pub firm_saved: bool,
+    /// From contacts… was pressed on this row: ask for the file once the window is drawn.
+    pub contact_ask: Option<(u8, usize)>,
     /// Why the last Create didn't go through.
     pub error: Option<String>,
     /// File › New is waiting on its Save Changes prompt: the document that was open then.
     pub pending: Option<u64>,
     /// The saved firm details have been read in.
     loaded: bool,
+    /// Edit Pleading: the form of the open pleading, changing its text only.
+    pub edit: bool,
+    /// Edit mode: the pleading has a division line (whether it has one can't change).
+    pub had_division: bool,
+    /// The saved courts, read when the window opens.
+    pub courts: Vec<Value>,
+    /// Save the form's court under [`Self::court_name`] on Create.
+    pub save_court: bool,
+    pub court_name: String,
+    /// A party row whose From contacts… file is being picked: (side 1 or 2, row).
+    pub contact_for: Option<(u8, usize)>,
+    /// The contacts in the picked file, when it has more than one: pick one.
+    pub contact_choices: Vec<Value>,
 }
 
 impl Default for PleadingForm {
@@ -168,12 +212,79 @@ impl Default for PleadingForm {
             second: SideForm::new("Respondent", false),
             filing_date: today(),
             verified: false,
+            served: None,
             firm: Firm::default(),
             remember_firm: true,
             firm_saved: false,
             error: None,
+            contact_ask: None,
             pending: None,
             loaded: false,
+            division: String::new(),
+            edit: false,
+            had_division: false,
+            courts: Vec::new(),
+            save_court: false,
+            court_name: String::new(),
+            contact_for: None,
+            contact_choices: Vec::new(),
+        }
+    }
+}
+
+impl PleadingForm {
+    /// Edit Pleading's form: the open pleading's values (`law.pleadings.current`).
+    pub fn from_current(v: &Value) -> Self {
+        let kind = TYPES.iter().map(|(k, _, _)| *k).find(|k| v["type"] == *k).unwrap_or("motion");
+        let text = |k: &str| v[k].as_str().unwrap_or("").to_string();
+        let division = text("division");
+        Self {
+            kind,
+            title: text("title"),
+            court_type: text("courtType"),
+            county: text("county"),
+            had_division: v.get("division").is_some(),
+            division,
+            case_number: text("caseNumber"),
+            first: SideForm::from_json(&v["firstSide"], &FIRST_ROLES),
+            second: SideForm::from_json(&v["secondSide"], &SECOND_ROLES),
+            filing_date: v["filingDate"].as_str().map(str::to_string).unwrap_or_else(today),
+            verified: v["verified"].as_bool().unwrap_or(false),
+            edit: true,
+            // The firm block isn't part of Edit Pleading.
+            remember_firm: false,
+            firm_saved: true,
+            served: v.get("servedParty").map(|_| (text("servedParty"), text("servedAddress"))),
+            ..Self::default()
+        }
+    }
+
+    /// The name Save this court offers: "Adair County Circuit".
+    pub fn default_court_name(&self) -> String {
+        let tc = |t: &str| wordcraft_law::pleadings::title_case(t.trim());
+        format!("{} County {}", tc(&self.county), tc(&self.court_type)).trim().to_string()
+    }
+
+    /// Fill the court fields from a saved court.
+    pub fn use_court(&mut self, court: &Value) {
+        let text = |k: &str| court[k].as_str().unwrap_or("").to_string();
+        self.court_type = text("courtType");
+        self.county = text("county");
+        if !self.edit || self.had_division {
+            self.division = text("division");
+        }
+    }
+
+    /// Fill a party row from a contact: its name (or organization) and mailing address.
+    pub fn use_contact(&mut self, (side, row): (u8, usize), contact: &Value) {
+        let side = if side == 1 { &mut self.first } else { &mut self.second };
+        let Some(p) = side.parties.get_mut(row) else { return };
+        let name = contact["name"].as_str().filter(|n| !n.trim().is_empty()).or(contact["organization"].as_str()).unwrap_or("");
+        if !name.trim().is_empty() {
+            p.name = name.trim().to_string();
+        }
+        if let Some(a) = contact["address"].as_str().filter(|a| !a.trim().is_empty()) {
+            p.address = a.trim().to_string();
         }
     }
 }
@@ -227,6 +338,12 @@ impl PleadingForm {
                 return Some(format!("Fill in the mailing address for {} to create.", p.name.trim()));
             }
         }
+        if self.save_court && self.court_name.trim().is_empty() {
+            return fill("the court's name");
+        }
+        if self.edit {
+            return None;
+        }
         firm_missing(&self.firm).map(|label| format!("Fill in {label} to create."))
     }
 
@@ -246,14 +363,37 @@ impl PleadingForm {
         if self.petition() {
             p["verified"] = json!(self.verified);
         }
+        if !self.division.trim().is_empty() {
+            p["division"] = json!(self.division.trim());
+        }
+        if self.save_court {
+            p["saveCourt"] = json!(self.court_name.trim());
+        }
+        if self.edit {
+            // Edit Pleading leaves the signature block alone.
+            if let Some(o) = p.as_object_mut() {
+                o.remove("firm");
+            }
+            if let Some((party, address)) = &self.served {
+                p["service"] = json!("efileUsps");
+                p["servedParty"] = json!(party);
+                p["servedAddress"] = json!(address);
+            }
+        }
         p
     }
 }
 
 /// `law.pleadings.new` asked for the window.
 pub(crate) fn open(law: &mut crate::LawUi, what: &str) {
-    if what == "newPleading" && law.pleading.is_none() {
-        law.pleading = Some(PleadingForm::default());
+    if law.pleading.is_some() {
+        return;
+    }
+    match what {
+        "newPleading" => law.pleading = Some(PleadingForm::default()),
+        // Filled from the document when the window first draws (it needs the session).
+        "editPleading" => law.pleading = Some(PleadingForm { edit: true, ..PleadingForm::default() }),
+        _ => {}
     }
 }
 
@@ -261,12 +401,27 @@ pub(crate) fn open(law: &mut crate::LawUi, what: &str) {
 pub(crate) fn show(app: &mut Ctx<'_>, ctx: &egui::Context) {
     let Some(mut form) = app.law.pleading.take() else { return };
     if !form.loaded {
-        form.loaded = true;
-        let saved = app.run("law.firm.get", json!({})).unwrap_or_default();
-        if saved.as_object().is_some_and(|o| !o.is_empty()) {
-            form.firm = firm_from(&saved);
-            form.firm_saved = true;
+        if form.edit {
+            match app.run("law.pleadings.current", json!({})) {
+                Ok(v) => form = PleadingForm::from_current(&v),
+                Err(e) => {
+                    app.status(e);
+                    return;
+                }
+            }
+        } else {
+            let saved = app.run("law.firm.get", json!({})).unwrap_or_default();
+            if saved.as_object().is_some_and(|o| !o.is_empty()) {
+                form.firm = firm_from(&saved);
+                form.firm_saved = true;
+            }
         }
+        form.loaded = true;
+        form.courts = app.run("law.courts.list", json!({})).ok().and_then(|v| v.as_array().cloned()).unwrap_or_default();
+    }
+    if let Some(at) = form.contact_ask.take() {
+        form.contact_for = Some(at);
+        app.addin_ask_file(wordcraft_law::MODULE, FileDialogRequest::Open { purpose: "contacts".into() }, "contacts");
     }
     let mut keep = true;
     if let Some(old) = form.pending {
@@ -284,29 +439,27 @@ pub(crate) fn show(app: &mut Ctx<'_>, ctx: &egui::Context) {
     if keep && form.pending.is_none() {
         let mut open = true;
         let mut close = false;
-        egui::Window::new("New Pleading").id(egui::Id::unique("law_new_pleading")).collapsible(false).resizable(false).open(&mut open).show(
-            ctx,
-            |ui| {
-                ui.set_min_width(420.0);
-                egui::ScrollArea::vertical().max_height(560.0).show(ui, |ui| form_ui(ui, &mut form));
-                if let Some(e) = &form.error {
-                    ui.colored_label(ui.visuals().error_fg_color, e);
+        let (heading, action) = if form.edit { ("Edit Pleading", "Update") } else { ("New Pleading", "Create") };
+        egui::Window::new(heading).id(egui::Id::unique("law_new_pleading")).collapsible(false).resizable(false).open(&mut open).show(ctx, |ui| {
+            ui.set_min_width(420.0);
+            egui::ScrollArea::vertical().max_height(560.0).show(ui, |ui| form_ui(ui, &mut form));
+            if let Some(e) = &form.error {
+                ui.colored_label(ui.visuals().error_fg_color, e);
+            }
+            let missing = form.missing().map(|m| if form.edit { m.replace(" to create.", " to update.") } else { m });
+            if let Some(why) = &missing {
+                ui.label(RichText::new(why).small().weak());
+            }
+            ui.add_space(6.0);
+            ui.horizontal(|ui| {
+                if ui.add_enabled(missing.is_none(), egui::Button::new(action)).clicked() && submit(app, &mut form) {
+                    close = true;
                 }
-                let missing = form.missing();
-                if let Some(why) = &missing {
-                    ui.label(RichText::new(why).small().weak());
+                if ui.button("Cancel").clicked() {
+                    close = true;
                 }
-                ui.add_space(6.0);
-                ui.horizontal(|ui| {
-                    if ui.add_enabled(missing.is_none(), egui::Button::new("Create")).clicked() && submit(app, &mut form) {
-                        close = true;
-                    }
-                    if ui.button("Cancel").clicked() {
-                        close = true;
-                    }
-                });
-            },
-        );
+            });
+        });
         keep = open && !close && keep;
     }
     if keep {
@@ -314,36 +467,80 @@ pub(crate) fn show(app: &mut Ctx<'_>, ctx: &egui::Context) {
     }
 }
 
-/// The New Pleading form's fields.
+/// The New Pleading form's fields. In edit mode what decides the paragraphs (type, parties,
+/// client and pro se marks) is greyed out.
 fn form_ui(ui: &mut Ui, form: &mut PleadingForm) {
-    let field = |ui: &mut Ui, label: &str, value: &mut String| {
+    let edit = form.edit;
+    let field = |ui: &mut Ui, label: &str, value: &mut String, enabled: bool| {
         let l = ui.label(label);
-        ui.add(egui::TextEdit::singleline(value).desired_width(260.0)).labelled_by(l.id);
+        ui.add_enabled(enabled, egui::TextEdit::singleline(value).desired_width(260.0)).labelled_by(l.id);
         ui.end_row();
     };
+    if !form.contact_choices.is_empty() {
+        contact_choice_ui(ui, form);
+        return;
+    }
     egui::Grid::new("law_pleading_form").num_columns(2).spacing([8.0, 4.0]).show(ui, |ui| {
         ui.label("Type");
         ui.horizontal(|ui| {
             for (kind, label, title) in TYPES {
-                if ui.selectable_label(form.kind == kind, label).clicked() && form.kind != kind {
+                if ui.add_enabled_ui(!edit, |ui| ui.selectable_label(form.kind == kind, label)).inner.clicked() && form.kind != kind {
                     form.kind = kind;
                     form.title = title.to_string();
                 }
             }
         });
         ui.end_row();
-        field(ui, "Title", &mut form.title);
-        field(ui, "Court type", &mut form.court_type);
-        field(ui, "County", &mut form.county);
-        field(ui, "Case No.", &mut form.case_number);
+        if edit {
+            ui.label("");
+            ui.label(RichText::new(format!("Type and parties: {STRUCTURE}")).small().weak());
+            ui.end_row();
+        }
+        field(ui, "Title", &mut form.title, true);
+        if !form.courts.is_empty() {
+            let l = ui.label("Saved court");
+            let mut pick: Option<Value> = None;
+            egui::ComboBox::from_id_salt("law_saved_court")
+                .selected_text("Choose a court…")
+                .width(260.0)
+                .show_ui(ui, |ui| {
+                    for c in &form.courts {
+                        if ui.selectable_label(false, c["name"].as_str().unwrap_or("")).clicked() {
+                            pick = Some(c.clone());
+                        }
+                    }
+                })
+                .response
+                .labelled_by(l.id);
+            if let Some(c) = pick {
+                form.use_court(&c);
+            }
+            ui.end_row();
+        }
+        field(ui, "Court type", &mut form.court_type, true);
+        field(ui, "County", &mut form.county, true);
+        field(ui, "Division", &mut form.division, !edit || form.had_division);
+        field(ui, "Case No.", &mut form.case_number, true);
+    });
+    ui.horizontal(|ui| {
+        if ui.checkbox(&mut form.save_court, "Save this court").changed() && form.save_court && form.court_name.trim().is_empty() {
+            form.court_name = form.default_court_name();
+        }
+        if form.save_court {
+            ui.add(egui::TextEdit::singleline(&mut form.court_name).hint_text("Name in the list").desired_width(200.0));
+        }
     });
     let petition = form.kind == "petition";
     // Our clients are all on one side: ticking Client on one side clears the other's.
-    if side_ui(ui, "First side", &FIRST_ROLES, &mut form.first, petition, "law_side_first") {
+    let mut ask = None;
+    if side_ui(ui, "First side", &FIRST_ROLES, &mut form.first, petition, edit, (1, &mut ask), "law_side_first") {
         form.second.parties.iter_mut().for_each(|p| p.client = false);
     }
-    if side_ui(ui, "Second side", &SECOND_ROLES, &mut form.second, petition, "law_side_second") {
+    if side_ui(ui, "Second side", &SECOND_ROLES, &mut form.second, petition, edit, (2, &mut ask), "law_side_second") {
         form.first.parties.iter_mut().for_each(|p| p.client = false);
+    }
+    if ask.is_some() {
+        form.contact_ask = ask;
     }
     ui.add_space(6.0);
     egui::Grid::new("law_pleading_form_end").num_columns(2).spacing([8.0, 4.0]).show(ui, |ui| {
@@ -352,10 +549,23 @@ fn form_ui(ui: &mut Ui, form: &mut PleadingForm) {
         ui.end_row();
         if petition {
             ui.label("");
-            ui.checkbox(&mut form.verified, "Verified");
+            ui.add_enabled(!edit, egui::Checkbox::new(&mut form.verified, "Verified"));
             ui.end_row();
         }
     });
+    if let Some((party, address)) = form.served.as_mut() {
+        egui::Grid::new("law_pleading_served").num_columns(2).spacing([8.0, 4.0]).show(ui, |ui| {
+            let l = ui.label("Served party");
+            ui.add(egui::TextEdit::singleline(party).desired_width(260.0)).labelled_by(l.id);
+            ui.end_row();
+            let l = ui.label("Served at");
+            ui.add(egui::TextEdit::singleline(address).desired_width(260.0)).labelled_by(l.id);
+            ui.end_row();
+        });
+    }
+    if edit {
+        return;
+    }
     ui.add_space(6.0);
     egui::CollapsingHeader::new("Firm details").default_open(!form.firm_saved).show(ui, |ui| {
         firm_fields(ui, &mut form.firm, "law_pleading_firm");
@@ -363,9 +573,49 @@ fn form_ui(ui: &mut Ui, form: &mut PleadingForm) {
     ui.checkbox(&mut form.remember_firm, "Remember firm details");
 }
 
+/// The picked contact file has several contacts: pick the one for the row.
+fn contact_choice_ui(ui: &mut Ui, form: &mut PleadingForm) {
+    ui.label(RichText::new("Choose a contact").font(semibold(13.0)));
+    let mut chosen = None;
+    egui::ScrollArea::vertical().max_height(360.0).id_salt("law_contacts").show(ui, |ui| {
+        for (i, c) in form.contact_choices.iter().enumerate() {
+            let name = c["name"].as_str().unwrap_or("");
+            let org = c["organization"].as_str().filter(|o| !o.is_empty() && *o != name);
+            let label = match org {
+                Some(o) => format!("{name} ({o})"),
+                None => name.to_string(),
+            };
+            if ui.selectable_label(false, label).clicked() {
+                chosen = Some(i);
+            }
+        }
+    });
+    if let Some(i) = chosen {
+        if let (Some(at), Some(c)) = (form.contact_for.take(), form.contact_choices.get(i).cloned()) {
+            form.use_contact(at, &c);
+        }
+        form.contact_choices.clear();
+    }
+    if ui.button("Back").clicked() {
+        form.contact_choices.clear();
+        form.contact_for = None;
+    }
+}
+
 /// One side: its role (from the list, or Other typed in) and its parties, each with Client and,
-/// outside a petition, Pro se with a mailing address. `true` when a Client box was just ticked.
-fn side_ui(ui: &mut Ui, heading: &str, roles: &[&str], side: &mut SideForm, petition: bool, salt: &str) -> bool {
+/// outside a petition, Pro se with a mailing address, and From contacts…. `true` when a Client
+/// box was just ticked. In edit mode only the names, role and addresses change.
+#[allow(clippy::too_many_arguments)]
+fn side_ui(
+    ui: &mut Ui,
+    heading: &str,
+    roles: &[&str],
+    side: &mut SideForm,
+    petition: bool,
+    edit: bool,
+    (n, ask): (u8, &mut Option<(u8, usize)>),
+    salt: &str,
+) -> bool {
     let mut ticked = false;
     ui.add_space(6.0);
     ui.label(RichText::new(heading).font(semibold(13.0)));
@@ -400,14 +650,17 @@ fn side_ui(ui: &mut Ui, heading: &str, roles: &[&str], side: &mut SideForm, peti
             ui.push_id(i, |ui| {
                 ui.horizontal(|ui| {
                     ui.add(egui::TextEdit::singleline(&mut p.name).hint_text("Name").desired_width(220.0));
-                    if ui.checkbox(&mut p.client, "Client").changed() && p.client {
+                    if ui.add_enabled(!edit, egui::Checkbox::new(&mut p.client, "Client")).changed() && p.client {
                         p.pro_se = false;
                         ticked = true;
                     }
                     if !petition {
-                        ui.add_enabled(!p.client, egui::Checkbox::new(&mut p.pro_se, "Pro se"));
+                        ui.add_enabled(!p.client && !edit, egui::Checkbox::new(&mut p.pro_se, "Pro se"));
                     }
-                    if count > 1 && ui.small_button("Remove").clicked() {
+                    if ui.small_button("From contacts…").on_hover_text("Fill the name and mailing address from a contact file (.vcf)").clicked() {
+                        *ask = Some((n, i));
+                    }
+                    if count > 1 && !edit && ui.small_button("Remove").clicked() {
                         remove = Some(i);
                     }
                 });
@@ -422,17 +675,60 @@ fn side_ui(ui: &mut Ui, heading: &str, roles: &[&str], side: &mut SideForm, peti
         if let Some(i) = remove {
             side.parties.remove(i);
         }
-        if side.parties.len() < MAX_NAMES && ui.small_button("Add name").clicked() {
+        if side.parties.len() < MAX_NAMES && !edit && ui.small_button("Add name").clicked() {
             side.parties.push(PartyRow::default());
         }
     });
     ticked
 }
 
+/// A contact file was picked for a party row: one contact fills the row; several are offered
+/// in the window to pick from.
+pub(crate) fn contacts_picked(app: &mut Ctx<'_>, picked: Option<String>) -> Result<Value, String> {
+    let Some(path) = picked else {
+        if let Some(f) = app.law.pleading.as_mut() {
+            f.contact_for = None;
+        }
+        return Ok(json!({"cancelled": true}));
+    };
+    let r = app.run("law.contacts.read", json!({"path": path}));
+    let Some(form) = app.law.pleading.as_mut() else { return r };
+    match &r {
+        Ok(Value::Array(list)) if list.len() == 1 => {
+            if let Some(at) = form.contact_for.take() {
+                form.use_contact(at, &list[0]);
+            }
+        }
+        Ok(Value::Array(list)) if list.is_empty() => {
+            form.contact_for = None;
+            form.error = Some("No contacts with a name in that file.".into());
+        }
+        Ok(Value::Array(list)) => form.contact_choices = list.clone(),
+        Ok(_) => {}
+        Err(e) => {
+            form.contact_for = None;
+            form.error = Some(e.clone());
+        }
+    }
+    r
+}
+
 /// Create: save the firm details if asked, make sure the document is blank (File › New, with its
 /// Save Changes prompt), then write the pleading. `true`: done, close the window.
 fn submit(app: &mut Ctx<'_>, form: &mut PleadingForm) -> bool {
     form.error = None;
+    if form.edit {
+        return match app.run("law.pleadings.edit", form.params()) {
+            Ok(_) => {
+                app.canvas.want_focus = true;
+                true
+            }
+            Err(e) => {
+                form.error = Some(e);
+                false
+            }
+        };
+    }
     if form.remember_firm {
         if let Err(e) = app.run("law.firm.set", firm_json(&form.firm)) {
             form.error = Some(e);
@@ -525,6 +821,52 @@ pub(crate) fn save_firm(app: &mut Ctx<'_>) -> bool {
         Err(e) => {
             app.law.firm_message = Some(e);
             false
+        }
+    }
+}
+
+/// File › Options › LawCraft: the saved courts New Pleading offers, with Rename and Delete.
+pub(crate) fn courts_section(app: &mut Ctx<'_>, ui: &mut Ui) {
+    ui.label(RichText::new("Courts").font(semibold(14.0)));
+    ui.label(RichText::new("New Pleading offers these. Save one with Save this court in New Pleading.").small().weak());
+    let courts = app.run("law.courts.list", json!({})).ok().and_then(|v| v.as_array().cloned()).unwrap_or_default();
+    if courts.is_empty() {
+        ui.label(RichText::new("No saved courts yet.").weak());
+        return;
+    }
+    let mut act: Option<(&str, Value)> = None;
+    egui::Grid::new("law_courts").num_columns(3).spacing([8.0, 4.0]).show(ui, |ui| {
+        for c in &courts {
+            let id = c["id"].as_str().unwrap_or("").to_string();
+            match app.law.court_rename.as_mut().filter(|(r, _)| *r == id) {
+                Some((_, name)) => {
+                    ui.add(egui::TextEdit::singleline(name).desired_width(220.0));
+                    if ui.button("Save").clicked() {
+                        let mut v = c.clone();
+                        v["name"] = json!(name.trim());
+                        act = Some(("save", v));
+                    }
+                }
+                None => {
+                    let detail =
+                        [c["courtType"].as_str(), c["county"].as_str(), c["division"].as_str()].into_iter().flatten().collect::<Vec<_>>().join(", ");
+                    ui.label(c["name"].as_str().unwrap_or("")).on_hover_text(detail);
+                    if ui.button("Rename").clicked() {
+                        app.law.court_rename = Some((id.clone(), c["name"].as_str().unwrap_or("").to_string()));
+                    }
+                }
+            }
+            if ui.button("Delete").clicked() {
+                act = Some(("delete", json!({"id": id})));
+            }
+            ui.end_row();
+        }
+    });
+    if let Some((what, v)) = act {
+        let r = if what == "save" { app.run("law.courts.save", v) } else { app.run("law.courts.delete", v) };
+        app.law.court_rename = None;
+        if let Err(e) = r {
+            app.status(e);
         }
     }
 }
