@@ -1,33 +1,83 @@
 name: Release
 
-# A draft GitHub Release with every installer, from a push to the release branch or by hand.
+# Every morning, when main has changed since the last release and its CI passed: build every
+# installer and publish the next version (1.0.0, 1.0.1, ...) as a full release, which installed
+# copies' updaters pick up. By hand: empty version means the next one; a version with a dash
+# (1.1.0-rc.1) stays a draft for testing. On failure an issue is assigned to the maintainer.
 # Without the signing secrets the builds are unsigned (Windows and macOS warn on install).
 on:
+  schedule:
+    - cron: "0 13 * * *" # 8 a.m. Central daylight time, after the nightly WordCraft sync
   push:
     branches: [release]
   workflow_dispatch:
     inputs:
       version:
-        description: "Version override for a test run, e.g. 1.0.0-rc.1 (empty: Cargo.toml)"
+        description: "Version, e.g. 1.0.4 or 1.1.0-rc.1 (empty: the next patch version)"
         type: string
         default: ""
 
 permissions:
   contents: write
+  issues: write
+  actions: read
 
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
 
+env:
+  MAINTAINER: pattalkslaw-del
+  ISSUE_TITLE: "LawCraft release needs attention"
+
 jobs:
+  decide:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.d.outputs.version }}
+      go: ${{ steps.d.outputs.go }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - id: d
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          last="$(git tag -l 'v[0-9]*' | grep -v -- - | sort -V | tail -1)"
+          if [ -n "$INPUT_VERSION" ]; then
+            v="${INPUT_VERSION#v}"
+          elif [ -z "$last" ]; then
+            v=1.0.0
+          else
+            IFS=. read -r a b c <<<"${last#v}"
+            v="$a.$b.$((c + 1))"
+          fi
+          go=true
+          if [ "$GITHUB_EVENT_NAME" = schedule ]; then
+            if [ -n "$last" ] && [ "$(git rev-list -n1 "$last")" = "$GITHUB_SHA" ]; then
+              echo "No change since $last; nothing to release."; go=false
+            else
+              ci="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$GITHUB_SHA&per_page=1" --jq '.workflow_runs[0].conclusion // "none"')"
+              if [ "$ci" != success ]; then
+                echo "::error::CI on $GITHUB_SHA is '$ci'; not releasing."; exit 1
+              fi
+            fi
+          fi
+          echo "Release: $v (go=$go)"
+          { echo "version=$v"; echo "go=$go"; } >>"$GITHUB_OUTPUT"
+
   release:
+    needs: decide
+    if: needs.decide.outputs.go == 'true'
     uses: ./.github/workflows/build-release.yml
     with:
       app-name: wordcraft
       app-title: LawCraft
       craft-fonts-ref: b076417b5880bd4154bd22f00695b1d28c6bea83
       web-craft-fonts: true
-      version: ${{ inputs.version }}
+      version: ${{ needs.decide.outputs.version }}
       has-web: false
       has-riscv64: false
       has-freebsd: false
@@ -47,3 +97,22 @@ jobs:
       AZURE_SIGNING_ENDPOINT: ${{ secrets.AZURE_SIGNING_ENDPOINT }}
       AZURE_SIGNING_ACCOUNT: ${{ secrets.AZURE_SIGNING_ACCOUNT }}
       AZURE_CERT_PROFILE: ${{ secrets.AZURE_CERT_PROFILE }}
+
+  # An issue assigned to the maintainer, mentioning him, so GitHub emails him.
+  alert:
+    needs: [decide, release]
+    if: failure()
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          V: ${{ needs.decide.outputs.version }}
+        run: |
+          run="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          body="@$MAINTAINER LawCraft ${V:+v$V }was not released. Run: $run"
+          n="$(gh api "repos/$GITHUB_REPOSITORY/issues?state=open&per_page=100" --jq '[.[] | select(.title == env.ISSUE_TITLE) | .number][0] // empty')"
+          if [ -n "$n" ]; then
+            gh api "repos/$GITHUB_REPOSITORY/issues/$n/comments" -f body="$body" --silent
+          else
+            gh api "repos/$GITHUB_REPOSITORY/issues" -f title="$ISSUE_TITLE" -f body="$body" -f "assignees[]=$MAINTAINER" --silent
+          fi

@@ -207,6 +207,9 @@ jobs:
             exit 1
           fi
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Stamp LawCraft version
+        shell: bash
+        run: $(command -v python3 || command -v python) .github/release/stamp_version.py
       - name: Check out craft-fonts
         if: inputs.craft-fonts-ref != ''
         uses: storytold/craft-common-actions/actions/checkout-craft-fonts@a4acae8e3a54b0c198c9f22fe4f4197ffd9f58b8 # craft-common-actions main, 2026-10-22
@@ -344,6 +347,9 @@ jobs:
             exit 1
           fi
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Stamp LawCraft version
+        shell: bash
+        run: $(command -v python3 || command -v python) .github/release/stamp_version.py
       - name: Check out craft-fonts
         if: inputs.craft-fonts-ref != ''
         uses: storytold/craft-common-actions/actions/checkout-craft-fonts@a4acae8e3a54b0c198c9f22fe4f4197ffd9f58b8 # craft-common-actions main, 2026-10-22
@@ -449,6 +455,9 @@ jobs:
       INPUT_VERSION: ${{ inputs.version }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Stamp LawCraft version
+        shell: bash
+        run: $(command -v python3 || command -v python) .github/release/stamp_version.py
       - name: Check out craft-fonts
         if: inputs.craft-fonts-ref != ''
         uses: storytold/craft-common-actions/actions/checkout-craft-fonts@a4acae8e3a54b0c198c9f22fe4f4197ffd9f58b8 # craft-common-actions main, 2026-10-22
@@ -955,3 +964,11 @@ jobs:
           app-title: ${{ inputs.app-title }}
           prerelease: ${{ needs.version.outputs.prerelease }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
+      # LawCraft ships every build: a full release is published at once so installed copies'
+      # updaters see it. Pre-release versions (with a dash) stay drafts for testing.
+      - name: Publish
+        if: needs.version.outputs.prerelease == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          V: ${{ needs.version.outputs.version }}
+        run: gh release edit "v$V" -R "$GITHUB_REPOSITORY" --draft=false --prerelease=false --latest
