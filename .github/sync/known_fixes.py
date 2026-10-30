@@ -7,6 +7,7 @@ a person. Prints "fixed" and exits 0 when it handled the file; exits 1 when the 
 knows, or when WordCraft's version no longer has the text a fix expects (then a person looks).
 """
 
+import os
 import subprocess
 import sys
 
@@ -78,10 +79,56 @@ def packaging_lint(path):
     )
 
 
+def ours_stage(path):
+    """LawCraft's side of a conflicted file (merge stage 2)."""
+    return subprocess.run(["git", "show", f":2:{path}"], check=True, capture_output=True, text=True).stdout
+
+
+def rust_lines(crate):
+    """Rust source lines in crates/<crate>, the way docs/architecture.md counts them."""
+    n = 0
+    for root, _, files in os.walk(os.path.join("crates", crate)):
+        for name in files:
+            if name.endswith(".rs"):
+                with open(os.path.join(root, name), encoding="utf-8", errors="replace") as f:
+                    n += sum(1 for _ in f)
+    return f"{n:,}"
+
+
+def architecture(path):
+    """WordCraft's crate table, with LawCraft's two crates added after `zotero` (counted now)."""
+    lines = theirs(path).splitlines(keepends=True)
+    rows = [
+        f"| L5 | [`law`](../crates/law/src) | {rust_lines('law')} | LawCraft: court profiles as JSON data (`law.profiles.*`) and the checks engine (`law.checks.run`), applied through the engine's own style and layout commands ([`law.md`](law.md)) |\n",
+        f"| L6 | [`law-ui`](../crates/law-ui/src) | {rust_lines('law-ui')} | LawCraft's interface: its File › Options page (profiles, firm details) and the New Pleading window |\n",
+    ]
+    lines = [l for l in lines if not (l.startswith("| L5 | [`law`]") or l.startswith("| L6 | [`law-ui`]"))]
+    at = next((i for i, l in enumerate(lines) if l.startswith("| L5 | [`zotero`]")), None)
+    if at is None:
+        sys.exit(f"known fix for {path}: no `zotero` row in WordCraft's crate table")
+    lines[at + 1 : at + 1] = rows
+    return "".join(lines)
+
+
+def file_format_parity(path):
+    """WordCraft's version, with LawCraft's PDF open row (LawCraft imports PDFs)."""
+    mine = [l for l in ours_stage(path).splitlines(keepends=True) if l.startswith("| PDF open")]
+    if len(mine) != 1:
+        sys.exit(f"known fix for {path}: LawCraft's PDF open row not found")
+    lines = theirs(path).splitlines(keepends=True)
+    at = [i for i, l in enumerate(lines) if l.startswith("| PDF open")]
+    if len(at) != 1:
+        sys.exit(f"known fix for {path}: no PDF open row in WordCraft's version")
+    lines[at[0]] = mine[0]
+    return "".join(lines)
+
+
 FIXES = {
     "packaging/macos/package.sh": macos_package,
     ".github/workflows/windows-arm64.yml": windows_arm64,
     ".github/workflows/packaging-lint.yml": packaging_lint,
+    "docs/architecture.md": architecture,
+    "docs/file-format-parity.md": file_format_parity,
 }
 
 

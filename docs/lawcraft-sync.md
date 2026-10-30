@@ -10,7 +10,7 @@ has to pass before anything is pushed. **By hand** means the sync stops, opens t
 WordCraft sync needs attention" issue and assigns it, so GitHub emails the maintainer; the fix is
 to take WordCraft's version and add LawCraft's lines back where WordCraft now keeps that code.
 
-Last checked against WordCraft 0.12.0 (`3de6ff95`), 2026-10-28.
+Last checked against WordCraft main (`5b5810fe`), 2026-10-30.
 
 ## Fixed by the sync on its own
 
@@ -22,12 +22,15 @@ Last checked against WordCraft 0.12.0 (`3de6ff95`), 2026-10-28.
 | `packaging/macos/package.sh` | `LawCraft.app` and `lawcraft-*` file names | WordCraft's version, renamed by `.github/sync/known_fixes.py` |
 | `.github/workflows/windows-arm64.yml` | Install folder `LawCraft`, `lawcraft.exe`, `lawcraft-cli.exe` | WordCraft's version, renamed by `known_fixes.py` |
 | `.github/workflows/packaging-lint.yml` | WordCraft's installer-policy job checks WordCraft's MSI only | WordCraft's version, the job limited to WordCraft's repository by `known_fixes.py` |
+| `.github/workflows/release.yml` | LawCraft publishes its own releases (`build-release.yml`, its own permissions and schedule) | LawCraft's version |
+| `docs/architecture.md` | The `law` and `law-ui` rows in the crate table | WordCraft's version, the two rows added after `zotero` with their line counts measured at merge time, by `known_fixes.py` |
+| `docs/file-format-parity.md` | LawCraft opens PDFs as editable copies | WordCraft's version with LawCraft's PDF open row, by `known_fixes.py` |
 
 ## By hand
 
 ### Name, icon and app id (rename only)
 
-`.github/workflows/release.yml`, `ATTRIBUTION.md`, `ROADMAP.md`, `apps/wordcraft/src/default_apps.rs`,
+`ATTRIBUTION.md`, `ROADMAP.md`, `apps/wordcraft/src/default_apps.rs`,
 `apps/wordcraft/src/main.rs` (window title and app id), `assets/app-icon/*`, `crates/control-key/src/lib.rs`,
 `crates/mcp/src/server.rs`, `crates/ui-egui/src/chrome.rs`, `packaging/icons.sh`, `packaging/linux/*`,
 `packaging/macos/Info.plist.in`, `packaging/windows/sign.ps1`. These are candidates for `known_fixes.py`
@@ -43,7 +46,7 @@ the first time one conflicts.
 `crates/ui-egui/Cargo.toml`, `crates/ui-egui/src/lib.rs`, `app/commands.rs` (`file.options
 {"modules"}` turns an add-in on or off), `app/control.rs`, `app/prefs.rs`, `control/handler.rs`,
 `options.rs` (File › Options › Add-ins), `widgets/buttons.rs`, `windows.rs`, `window_ui.rs`,
-`xtask/src/layers.rs`, `docs/architecture.md`.
+`xtask/src/layers.rs`.
 
 ### Hooks the legal add-in uses
 
@@ -78,7 +81,7 @@ the first time one conflicts.
 
 `crates/pdf/Cargo.toml`, `crates/pdf/src/lib.rs`, `crates/engine/src/io.rs`, `cmd/file.rs`,
 `crates/ui-egui/src/dialogs.rs`, `dialogs/chrome.rs`, `dialogs/dispatch.rs`, `app/files.rs`,
-`app/pictures.rs`, `i18n.rs`, `apps/wordcraft-cli/src/main.rs`, `docs/file-format-parity.md`, `docs/gaps.md`.
+`app/pictures.rs`, `i18n.rs`, `apps/wordcraft-cli/src/main.rs`, `docs/gaps.md`.
 
 ### Tests that go with the above
 
