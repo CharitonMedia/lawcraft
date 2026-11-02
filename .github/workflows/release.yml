@@ -1,13 +1,13 @@
 name: Release
 
-# Every morning, when main has changed since the last release and its CI passed: build every
+# Once a week (Tuesday morning), when main has changed since the last release and its CI passed: build every
 # installer and publish the next version (1.0.0, 1.0.1, ...) as a full release, which installed
 # copies' updaters pick up. By hand: empty version means the next one; a version with a dash
 # (1.1.0-rc.1) stays a draft for testing. On failure an issue is assigned to the maintainer.
 # Without the signing secrets the builds are unsigned (Windows and macOS warn on install).
 on:
   schedule:
-    - cron: "0 13 * * *" # 8 a.m. Central daylight time, after the nightly WordCraft sync
+    - cron: "0 13 * * 2" # Tuesdays, 8 a.m. Central daylight time, a day after the weekly WordCraft sync
   push:
     branches: [release]
   workflow_dispatch:

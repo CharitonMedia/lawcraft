@@ -1,11 +1,11 @@
 name: Sync with WordCraft
 
-# Every night: merge WordCraft's main, run the full quality gate, and push to main when it passes.
+# Once a week (Monday, early morning): merge WordCraft's main, run the full quality gate, and push to main when it passes.
 # When the merge or the gate fails, nothing is pushed and an issue is opened (or updated) and
-# assigned to the maintainer, so GitHub emails him; a later passing night closes it.
+# assigned to the maintainer, so GitHub emails him; a later passing run closes it.
 on:
   schedule:
-    - cron: "0 8 * * *" # 3 a.m. Central daylight time, 2 a.m. standard
+    - cron: "0 8 * * 1" # Mondays, 3 a.m. Central daylight time, 2 a.m. standard
   workflow_dispatch:
     inputs:
       alert-test:
@@ -105,7 +105,7 @@ jobs:
         run: |
           run="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
           for n in $(gh api "repos/$GITHUB_REPOSITORY/issues?state=open&per_page=100" --jq '.[] | select(.title == env.ISSUE_TITLE) | .number'); do
-            gh api "repos/$GITHUB_REPOSITORY/issues/$n/comments" -f body="Tonight's sync passed: $run" --silent
+            gh api "repos/$GITHUB_REPOSITORY/issues/$n/comments" -f body="This week's sync passed: $run" --silent
             gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/$n" -f state=closed --silent
           done
 
@@ -124,7 +124,7 @@ jobs:
           elif [ -n "$CONFLICTS" ]; then
             why="Merging WordCraft's main conflicts with LawCraft in: \`$CONFLICTS\`. Nothing was pushed."
           else
-            why="The nightly sync failed before or during the quality gate (\`cargo xtask ci\`). Nothing was pushed."
+            why="The weekly sync failed before or during the quality gate (\`cargo xtask ci\`). Nothing was pushed."
           fi
           body="@$MAINTAINER $why
 

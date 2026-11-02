@@ -23,7 +23,7 @@ Installers are on the [releases page](https://github.com/CharitonMedia/lawcraft/
 
 ## How it relates to WordCraft
 
-LawCraft tracks WordCraft closely. Every night it merges WordCraft's latest work, runs the full test suite, and publishes the result. The legal tools are offered back to WordCraft as pull requests ([#1493](https://github.com/storytold/wordcraft/pull/1493), [#1863](https://github.com/storytold/wordcraft/pull/1863)); if WordCraft takes them, LawCraft will follow.
+LawCraft tracks WordCraft closely. Once a week it merges WordCraft's latest work, runs the full test suite, and publishes the result as a weekly release. The legal tools are offered back to WordCraft as pull requests ([#1493](https://github.com/storytold/wordcraft/pull/1493), [#1863](https://github.com/storytold/wordcraft/pull/1863)); if WordCraft takes them, LawCraft will follow.
 
 LawCraft keeps its own settings folder and its own app id, so it installs beside WordCraft without touching it.
 
