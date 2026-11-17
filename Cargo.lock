@@ -7039,7 +7039,6 @@ dependencies = [
  "quick-xml 0.41.0",
  "thiserror 2.0.21",
  "wordcraft-doc",
- "wordcraft-docx",
  "zip 3.0.0",
 ]
 
