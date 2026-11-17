@@ -130,14 +130,12 @@ pub fn check_paragraph(
             !is_correct_with_module(word, opts, module)
         });
     }
-    if grammar {
-        if let Some(hook) = module.grammar {
-            // Run the module grammar over the whole paragraph text (LawCraft confusion pairs).
-            for issue in hook(text) {
-                issues.push(issue);
-            }
-            issues.sort_by_key(|i| (i.start, i.end));
+    if grammar && let Some(hook) = module.grammar {
+        // Run the module grammar over the whole paragraph text (LawCraft confusion pairs).
+        for issue in hook(text) {
+            issues.push(issue);
         }
+        issues.sort_by_key(|i| (i.start, i.end));
     }
     issues
 }
