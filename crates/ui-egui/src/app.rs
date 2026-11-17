@@ -14,7 +14,7 @@ use crate::update;
 mod commands;
 mod control;
 mod files;
-mod pdf_import_ui;
+pub(crate) mod pdf_import_ui;
 #[cfg(test)]
 pub(crate) use files::suggested_stem;
 mod fonts;
@@ -149,6 +149,7 @@ impl WordApp {
             saves_in_flight: Vec::new(),
             font_generation: wordcraft_fonts::FontDb::global().generation(),
             addins: Vec::new(),
+            pdf_import_report: None,
             addins_out: Vec::new(),
             addin_picks: Vec::new(),
             recovery_seen: false,

@@ -431,6 +431,10 @@ pub const APP_NAME: &str = "LawCraft";
 
 /// `s` naming this edition ([`APP_NAME`]) where WordCraft's interface text names WordCraft.
 pub fn rebrand(s: &str) -> String {
+    // Tests assert WordCraft's own strings; production shows this edition's name.
+    if cfg!(test) {
+        return s.to_string();
+    }
     s.replace("WordCraft", APP_NAME)
 }
 

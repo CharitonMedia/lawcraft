@@ -208,6 +208,7 @@ impl WordApp {
             update: _,
             show_update_startup_prompt: _,
             addins: _,
+            pdf_import_report: _,
             addins_out: _,
             addin_picks: _,
             ctx: _,

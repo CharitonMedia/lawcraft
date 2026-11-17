@@ -127,6 +127,7 @@ impl WordApp {
             return;
         }
         self.addin_dialogs(ctx);
+        super::pdf_import_ui::show(self, ctx);
         updates_ui::show(self, ctx);
         #[cfg(not(target_arch = "wasm32"))]
         file_browser::show(self, ctx);
@@ -157,7 +158,7 @@ impl WordApp {
     /// Keep the window title and full-screen state in sync, then record this frame's time.
     pub(super) fn sync_title_and_frame(&mut self, ctx: &egui::Context, t0: f64) {
         // With native windows the viewport driver gives the window its title.
-        let title = self.window_title();
+        let title = crate::i18n::rebrand(&self.window_title());
         if title != self.sent_title {
             if !self.windows.driven() {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Title(title.clone()));

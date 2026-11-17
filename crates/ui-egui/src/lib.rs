@@ -785,6 +785,8 @@ pub struct WordApp {
     file_dialog: Option<file_dialogs::PendingDialog>,
     /// The add-ins the host gave the app ([`addins`]), in File › Options › Add-ins order.
     addins: Vec<Box<dyn addins::AddIn>>,
+    /// PDF import warnings dialog (LawCraft), when open.
+    pub(crate) pdf_import_report: Option<crate::app::pdf_import_ui::PdfImportReport>,
     /// Add-ins taken out of `addins` while one of their calls runs ([`WordApp::with_addin`]).
     addins_out: Vec<&'static str>,
     /// Files picked for an add-in while it was out (a host that answers at once): (add-in, tag,
