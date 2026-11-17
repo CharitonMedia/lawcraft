@@ -13,3 +13,7 @@ wordcraft-doc = { workspace = true }
 quick-xml = { workspace = true }
 zip = { workspace = true }
 thiserror = { workspace = true }
+
+[dev-dependencies]
+wordcraft-doc = { workspace = true, features = ["test-support"] }
+wordcraft-docx = { workspace = true }
