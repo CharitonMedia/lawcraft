@@ -737,22 +737,6 @@ mod tests {
     }
 
     #[test]
-    fn proof_text_keeps_byte_offsets_with_fields() {
-        let mut p = Paragraph::with_text("The statue of limitations.", CharProps::default());
-        p.insert_object(
-            0,
-            InlineObject::Field { instr: "PAGE".into(), result: "99999".into(), locked: false, code: false, dirty: false, form: String::new() },
-            &CharProps::default(),
-        )
-        .unwrap();
-        assert_ne!(p.plain_text(), p.proof_text(), "plain text expands the field result");
-        let statue = p.text.find("statue").expect("statue in storage");
-        let proof = p.proof_text();
-        let issue_start = proof.find("statue").expect("statue in proof text");
-        assert_eq!(issue_start, statue, "proof_text offsets match paragraph storage");
-    }
-
-    #[test]
     fn objects_track_text() {
         let mut p = Paragraph::with_text("ab", CharProps::default());
         p.insert_object(

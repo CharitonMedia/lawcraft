@@ -601,7 +601,7 @@ pub fn handle_quit(app: &mut WordApp, ctx: &egui::Context) -> bool {
     if !app.update.quit_pending {
         return false;
     }
-    if app.update_quit_requested() {
+    if quit_requested(app) {
         ctx.send_viewport_cmd(egui::ViewportCommand::Close);
     } else if ctx.input(|i| i.viewport().close_requested()) {
         // Only a close the window asked for this frame needs cancelling; a pending quit with
@@ -681,7 +681,7 @@ mod tests {
         let _ = apply_worker_result(&mut app, done, false, true);
         assert!(app.update.quit_pending, "a successful one-click update keeps the quit for the close path");
         assert!(!app.quit_requested, "the close path, not a direct quit, runs");
-        assert!(!app.update_quit_requested(), "unsaved edits block the close");
+        assert!(!quit_requested(&mut app), "unsaved edits block the close");
         assert!(matches!(app.dialog, Some(crate::dialogs::Dialog::SaveChanges { .. })), "the save prompt is shown");
 
         // Cancelling keeps the document open; nothing is lost.
@@ -706,7 +706,7 @@ mod tests {
 
         // The user types before the host acts on the quit.
         app.session.dirty = true;
-        assert!(!app.update_quit_requested(), "unsaved edits block the close");
+        assert!(!quit_requested(&mut app), "unsaved edits block the close");
         assert!(matches!(app.dialog, Some(crate::dialogs::Dialog::SaveChanges { .. })), "the save prompt is shown");
 
         // Cancelling keeps the document open; nothing is lost.
@@ -739,7 +739,7 @@ mod tests {
             ui_requests: vec![json!({"quit": true})],
         };
         let _ = apply_worker_result(&mut app, done, false, true);
-        assert!(app.update_quit_requested(), "the update quits without a second prompt");
+        assert!(quit_requested(&mut app), "the update quits without a second prompt");
         assert!(app.dialog.is_none(), "no save prompt");
 
         // A later edit is a new revision: it is protected again.
@@ -830,7 +830,7 @@ mod tests {
             ui_requests: vec![json!({"quit": true})],
         };
         let _ = apply_worker_result(&mut app, done, false, true);
-        assert!(app.update_quit_requested(), "a clean document may close");
+        assert!(quit_requested(&mut app), "a clean document may close");
         assert!(!app.update.quit_pending, "the pending quit was consumed");
         // The host asks the window to close; the next frame's close path allows it.
         assert!(app.close_requested(), "the close goes ahead");
@@ -946,10 +946,10 @@ mod tests {
         app.update.quit_pending = true;
         apply_ui_requests(&mut app, vec![json!({"updateReboot": true})]);
         assert!(app.update.reboot_notice);
-        assert!(!app.update_quit_requested(), "do not close while the restart banner is visible");
+        assert!(!quit_requested(&mut app), "do not close while the restart banner is visible");
         assert!(app.update.quit_pending, "the quit stays pending until after acknowledgement");
         app.update.reboot_notice = false;
-        assert!(app.update_quit_requested(), "after OK, the close may proceed");
+        assert!(quit_requested(&mut app), "after OK, the close may proceed");
     }
 
     /// Run `handle_quit` for one frame that also carries a window-close event, and return the

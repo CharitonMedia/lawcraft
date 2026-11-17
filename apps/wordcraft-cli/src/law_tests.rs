@@ -1,5 +1,6 @@
 //! LawCraft-owned CLI tests: update check offline, JSON shape, and PDF open/save.
 use super::*;
+use crate::update_check::{format_update_check_json, run_update_check};
 use serde_json::{Value, json};
 use std::path::Path;
 

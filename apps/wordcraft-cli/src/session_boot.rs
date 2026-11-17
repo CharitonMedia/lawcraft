@@ -34,5 +34,11 @@ pub(crate) fn headless_session(
     if let Some(name) = author {
         super::set_author(&mut headless.session, &name)?;
     }
+    crate::law_cli::enable_law(&mut headless.session);
     Ok(headless)
+}
+
+/// [`session`] with the LawCraft module on when the user's setting / env allows it.
+pub(crate) fn session_law(doc: wordcraft_doc::Document) -> Session {
+    crate::law_cli::with_law(session(doc))
 }

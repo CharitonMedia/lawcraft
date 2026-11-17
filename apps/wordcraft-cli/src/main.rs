@@ -7,9 +7,8 @@ mod script;
 mod session_boot;
 mod update_check;
 
-use law_cli::{apply_opened, enable_law, report_findings, with_law};
-use session_boot::{headless_session, session};
-use update_check::{format_update_check_json, run_update_check};
+use law_cli::{apply_opened, ok_findings, report_if_ok, USAGE};
+use session_boot::{headless_session, session, session_law};
 
 use std::ffi::{OsStr, OsString};
 use std::fmt;
@@ -19,74 +18,6 @@ use std::process::ExitCode;
 
 use serde_json::{Value, json};
 use wordcraft_engine::{CmdError, Session};
-
-const USAGE: &str = "\
-wordcraft-cli — WordCraft from the command line
-
-USAGE:
-  wordcraft-cli convert <in> <out> [--markup] [--update-fields] [--strict] [--format wordml2003|flatopc]
-                                              convert between formats (docx, doc [read], pdf, odt, rtf, html, md, tex, txt, json, png,
-                                              xml); --update-fields refreshes unlocked fields before saving
-                                              (if protection blocks updates, they are skipped with a warning);
-                                              an .xml file is a Word XML Document (Flat OPC), or with
-                                              --format wordml2003 a Word 2003 XML Document;
-                                              --markup (Print Markup): comments beside each page and
-                                              tracked changes in pdf/png, a comment list in html/md/txt;
-                                              --strict (pdf or png output only) writes nothing and exits 3
-                                              if a character can't be drawn or a picture is missing or
-                                              undecodable; the report is on stderr, with one JSON line
-  wordcraft-cli info <file>                   pages, words, paragraphs, properties (JSON)
-  wordcraft-cli text <file>                   plain text
-  wordcraft-cli inspect <file>                document structure (JSON)
-  wordcraft-cli render <file> <out.png> [--page N] [--scale S] [--strict]
-                                              --strict writes nothing and exits 3 if a character on the
-                                              page can't be drawn or a picture is missing or undecodable
-                                              (report on stderr, as for convert --strict)
-  wordcraft-cli run [--file F | --template T] [--script FILE|-] --cmd 'id={json}' [--cmd …]
-                    [--save OUT] [--print] [--author NAME]
-                                              run commands headlessly, then save (--author names
-                                              who tracked changes and comments are by).
-                                              --script runs a JSON file (- is stdin) first:
-                                              {\"file\"?, \"template\"?, \"commands\": [{\"command\": id,
-                                              \"params\"?: {…}} | id, …], \"save\"?: [OUT, …]}; save
-                                              formats follow the extension (docx and pdf in one run);
-                                              relative paths resolve against the script's folder.
-                                              file.new and file.open open another document and
-                                              make it active; later commands and the saves work on
-                                              the active one; view.switchWindows lists the open
-                                              documents and with {\"id\": N} makes one active
-  wordcraft-cli commands [--json]             list every command
-  wordcraft-cli parity [--markdown]           feature-catalog parity
-  wordcraft-cli update --check                ask GitHub for a newer release (JSON)
-  wordcraft-cli mcp [--connect HOST:PORT | --author NAME] [--automation-read-root DIR] [--automation-write-root DIR]
-                                              MCP server on stdio (headless, or bridged to the app).
-                                              --automation-read-root / --automation-write-root confine
-                                              the files the agent's commands read (open, insert text
-                                              or picture, mail-merge data, templates…) and write (save,
-                                              export, merge output…) to DIR, links followed; a root left
-                                              out grants none of its access. They apply to the headless
-                                              server and are an error with --connect.
-  wordcraft-cli zotero <command> <file> [--cmd 'id={json}' …] [--save OUT] [--trace] [--port P]
-                                              run a Zotero command on a document (Zotero must be
-                                              running): addEditCitation, addEditBibliography,
-                                              addNote, refresh, removeCodes, setDocPrefs
-                                              (--cmd runs first, e.g. --cmd caret.docEnd)
-  wordcraft-cli [<command>] -h | --help       this help
-  wordcraft-cli --version
-
-A password-protected Word file is opened with --password PASS, --password-file PATH or the
-WORDCRAFT_PASSWORD environment variable; a password given on the command line is readable by
-every other process, so the other two are better. A file opened with a password is written with
-it again, as the app does. Exports that cannot carry a password (pdf, html, txt) stay plain.
-
-Paper: documents created here, and HTML, Markdown and text files (which give no page size), use
-the system region's paper (A4, or Letter in the US and other Letter regions), read from
-LC_ALL / LC_PAPER / LANG or the platform. Set WORDCRAFT_REGION=en-US (or another tag) for the
-same output on every machine.
-
-LawCraft (court profiles, `law.profiles.*`) is an opt-in module: its commands are there when the
-app's options turn it on (law.enabled), or with WORDCRAFT_LAW=1 for one run. See docs/law.md.
-";
 
 /// The subcommands, in `USAGE` order; `--help` or `-h` after any of them prints `USAGE` (#968).
 const SUBCOMMANDS: &[&str] = &["convert", "info", "text", "inspect", "render", "run", "commands", "parity", "update", "mcp", "zotero"];
@@ -118,7 +49,7 @@ fn open(path: &Path, password: Option<&str>) -> Result<Session, Failure> {
     let opened = wordcraft_engine::io::open_path_report_in(path, password, &region).map_err(engine_error)?;
     let mut s = session(opened.doc);
     apply_opened(&mut s, path, password, opened.encrypted, opened.pdf.map(|p| p.warnings));
-    Ok(s)
+    Ok(law_cli::with_law(s))
 }
 
 /// The commands that open a file, and which positional argument it is, excluding option values.
@@ -352,7 +283,6 @@ const RUN_OPTIONS: &[OptionSpec] = &[
 const COMMANDS_OPTIONS: &[OptionSpec] = &[OptionSpec { name: "--json", takes_value: false }];
 const PARITY_OPTIONS: &[OptionSpec] = &[OptionSpec { name: "--markdown", takes_value: false }];
 const MCP_OPTIONS: &[OptionSpec] = &[OptionSpec { name: "--connect", takes_value: true }, OptionSpec { name: "--author", takes_value: true }];
-const UPDATE_OPTIONS: &[OptionSpec] = &[OptionSpec { name: "--check", takes_value: false }];
 const ZOTERO_OPTIONS: &[OptionSpec] = &[
     OptionSpec { name: "--cmd", takes_value: true },
     OptionSpec { name: "--save", takes_value: true },
@@ -497,8 +427,7 @@ fn run_convert(rest: &[String], open: impl Fn(&str, Option<&str>) -> Result<Sess
         return Err("convert: --strict needs a .pdf or .png output".into());
     }
     let password = password_from(rest)?;
-    // With LawCraft on, the applied court profile's checks run on the export, as in the app.
-    let mut s = with_law(open(&i, password.as_deref())?);
+    let mut s = open(&i, password.as_deref())?;
     if rest.iter().any(|a| a == "--update-fields") {
         update_fields(&mut s)?;
     }
@@ -511,9 +440,9 @@ fn run_convert(rest: &[String], open: impl Fn(&str, Option<&str>) -> Result<Sess
         }
         s.run("file.save", &params)
     };
-    match r {
-        Ok(r) => report_findings(&r),
-        Err(e) => return Err(if strict { refusal(&mut s, e, markup, to_png.then_some(1)) } else { engine_error(e) }),
+    report_if_ok(&r);
+    if let Err(e) = r {
+        return Err(if strict { refusal(&mut s, e, markup, to_png.then_some(1)) } else { engine_error(e) });
     }
     eprintln!("wrote {o}");
     Ok(())
@@ -590,7 +519,7 @@ fn run<S: AsRef<OsStr>>(args: &[S]) -> Result<(), Failure> {
             let (i, o) = (i.to_string(), o.to_string());
             let page = parse_page_arg("render", &rest)?.unwrap_or(1);
             let scale = parse_scale_arg("render", &rest)?.unwrap_or(2.0);
-            let mut s = with_law(open(&i, password.as_deref())?);
+            let mut s = open(&i, password.as_deref())?;
             let strict = rest.iter().any(|a| a == "--strict");
             let mut params = json!({"path": o, "page": page, "scale": scale, "strict": strict});
             if strict {
@@ -598,10 +527,7 @@ fn run<S: AsRef<OsStr>>(args: &[S]) -> Result<(), Failure> {
                 params["markup"] = json!(false);
             }
             let r = match s.run("file.exportPng", &params) {
-                Ok(r) => {
-                    report_findings(&r);
-                    r
-                }
+                Ok(r) => ok_findings(r),
                 Err(e) if strict => return Err(refusal(&mut s, e, false, Some(page))),
                 Err(e) => return Err(engine_error(e)),
             };
@@ -615,12 +541,12 @@ fn run<S: AsRef<OsStr>>(args: &[S]) -> Result<(), Failure> {
             let script = load_run_script(&rest, script_path.as_deref())?;
             let (from_file, from_template) = run_source_paths(&rest, script.as_ref());
             let mut s = match (from_file, from_template) {
-                (Some(f), _) => with_law(open(&f, password.as_deref())?),
+                (Some(f), _) => open(&f, password.as_deref())?,
                 // Both go through `file.new`, which puts a blank document on the region's paper (#3152).
                 // `file.new` opens beside the session's first document, which is then closed: the
                 // run starts with one open document.
                 (None, t) => {
-                    let mut s = with_law(session(wordcraft_doc::Document::new()));
+                    let mut s = session_law(wordcraft_doc::Document::new());
                     let first = s.document_id();
                     let params = t.map_or_else(|| json!({}), |t| json!({"template": t}));
                     s.run("file.new", &params).map_err(engine_error)?;
@@ -691,7 +617,7 @@ fn run<S: AsRef<OsStr>>(args: &[S]) -> Result<(), Failure> {
         }
         "commands" => {
             validate_options("commands", &rest, COMMANDS_OPTIONS)?;
-            let s = with_law(session(wordcraft_doc::Document::new()));
+            let s = session_law(wordcraft_doc::Document::new());
             if rest.iter().any(|a| a == "--json") {
                 let list = serde_json::to_string_pretty(&s.registry.describe()).unwrap_or_default();
                 write_stdout(|o| writeln!(o, "{list}"))
@@ -714,14 +640,7 @@ fn run<S: AsRef<OsStr>>(args: &[S]) -> Result<(), Failure> {
                 write_stdout(|o| writeln!(o, "{}", serde_json::to_string_pretty(&p).unwrap_or_default()))
             }
         }
-        "update" => {
-            validate_options("update", &rest, UPDATE_OPTIONS)?;
-            if !rest.iter().any(|a| a == "--check") {
-                return Err(format!("update: pass --check\n\n{USAGE}").into());
-            }
-            let v = run_update_check(update_check::http_get(), None)?;
-            write_stdout(|o| writeln!(o, "{}", format_update_check_json(&v)))
-        }
+        "update" => write_stdout(|o| writeln!(o, "{}", update_check::run_cmd(&rest).map_err(std::io::Error::other)?)),
         "mcp" => {
             let (roots, rest) = automation_roots("mcp", &rest)?;
             validate_options("mcp", &rest, MCP_OPTIONS)?;
@@ -762,8 +681,7 @@ fn run<S: AsRef<OsStr>>(args: &[S]) -> Result<(), Failure> {
                     }
                 }
                 None => {
-                    let mut headless = headless_session(update_check::http_get(), author, roots)?;
-                    enable_law(&mut headless.session);
+                    let headless = headless_session(update_check::http_get(), author, roots)?;
                     Box::new(headless)
                 }
             };

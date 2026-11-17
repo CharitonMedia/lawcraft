@@ -59,3 +59,22 @@ pub(crate) fn run_update_check(http: HttpGet, env: Option<wordcraft_engine::upda
 pub(crate) fn format_update_check_json(v: &Value) -> String {
     serde_json::to_string_pretty(v).unwrap_or_default()
 }
+
+const OPTIONS: &[&str] = &["--check"];
+
+/// Validate and run `wordcraft-cli update --check`; returns the pretty JSON body.
+pub(crate) fn run_cmd(rest: &[String]) -> Result<String, String> {
+    for a in rest {
+        if !a.starts_with("--") {
+            return Err(format!("update: unexpected argument `{a}`"));
+        }
+        if !OPTIONS.contains(&a.as_str()) {
+            return Err(format!("update: unknown option {a}"));
+        }
+    }
+    if !rest.iter().any(|a| a == "--check") {
+        return Err(format!("update: pass --check\n\n{}", crate::law_cli::USAGE));
+    }
+    let v = run_update_check(http_get(), None)?;
+    Ok(format_update_check_json(&v))
+}

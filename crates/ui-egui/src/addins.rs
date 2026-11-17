@@ -216,6 +216,24 @@ pub(crate) fn before_user_run(app: &mut WordApp, id: &str, params: &Value) -> Op
     Some(Ok(json!({"pending": what})))
 }
 
+/// After `execute_user` in a user `run`: report a finished in-thread update check.
+pub(crate) fn decorate_run(app: &mut WordApp, id: &str, r: Result<Value, String>) -> Result<Value, String> {
+    if id == "file.checkForUpdates" && r.as_ref().ok().and_then(|v| v.get("pending")).is_none() {
+        crate::update::report_update_check(app, r.clone());
+    }
+    r
+}
+
+/// Script/agent `execute`: add-in module toggles, then update hooks, then the WordCraft body.
+pub(crate) fn execute(app: &mut WordApp, id: &str, params: Value) -> Result<Value, String> {
+    intercept_execute(app, id, params, |app, id, params| {
+        if let Some(r) = crate::update::before_engine_command(app, id, &params) {
+            return r;
+        }
+        app.execute_inner(id, params)
+    })
+}
+
 /// `file.options` with modules: guard pending pages, run the inner command, then sync add-ins.
 pub(crate) fn intercept_execute(
     app: &mut WordApp,
@@ -240,6 +258,21 @@ pub(crate) fn handle_ui_request(app: &mut WordApp, req: &Value) -> bool {
     let what = req.get("open").and_then(Value::as_str).unwrap_or("");
     app.with_addin(id, |a, _| a.open(what));
     true
+}
+
+/// UI-layer commands owned by the update module, if any.
+pub(crate) fn wordcraft_command(app: &mut WordApp, id: &str) -> Option<Result<Value, String>> {
+    crate::update::wordcraft_command(app, id)
+}
+
+/// Update-related fields on a UI request, after WordCraft's own handling.
+pub(crate) fn after_ui_request(app: &mut WordApp, req: &Value) {
+    crate::update::handle_ui_request(app, req);
+}
+
+/// Commands that work with no open document, beyond WordCraft's usual set.
+pub(crate) fn works_without_document(id: &str) -> bool {
+    crate::update::works_without_document(id)
 }
 
 /// Change the options pane, letting an add-in's page save first when leaving it.

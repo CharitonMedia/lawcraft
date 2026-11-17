@@ -3,7 +3,6 @@ use super::{
     file_dialogs, i18n, json, keeps_everything, keytips, now_ms, options, panes, paste_picture, printing, push_recent_font, system_clipboard,
     table_pen, theme, widgets, zotero,
 };
-use crate::update;
 
 impl WordApp {
     /// `run` for a command a mouse drag on a table sends: the view stays where it is.
@@ -51,8 +50,7 @@ impl WordApp {
         }
         // The same unsaved work the control channel's refusal covers, so the prompt and the
         // refusal can't drift apart (#3274).
-        if (self.document_unsaved() || refused.is_some()) && (replaces || discards_document(id, &params)) && !self.closes_only_its_window(id, &params)
-        {
+        if (self.document_unsaved() || refused.is_some()) && (replaces || discards_document(id, &params)) && !self.closes_only_its_window(id, &params) {
             let name = self.prompt_name();
             self.dialog = Some(dialogs::Dialog::SaveChanges {
                 name,
@@ -80,12 +78,7 @@ impl WordApp {
         }
         let applied = applied_font(id, &params);
         let r = self.execute_user(id, params);
-        // Ribbon Help ▸ Check for Updates: when the check ran on this thread (no worker), say
-        // "up to date" or why GitHub could not be reached (#15 review). Off-thread checks return
-        // `pending` and report when the worker finishes.
-        if id == "file.checkForUpdates" && r.as_ref().ok().and_then(|v| v.get("pending")).is_none() {
-            update::report_update_check(self, r.clone());
-        }
+        let r = crate::addins::decorate_run(self, id, r);
         // A save error already on the status line is the reason to see; the refusal shows otherwise.
         if let (Some(e), true) = (refused, r.is_ok()) {
             self.status(e);
@@ -118,15 +111,13 @@ impl WordApp {
     }
 
     /// Run a command for a script or an agent (control channel, MCP bridge): never asks first.
-    /// UI-level commands (`ui.*`) are handled here, the rest by the engine. Turning an add-in on
-    /// or off (`file.options {"modules": …}`) applies it here, for scripts and the interface
-    /// alike: one being turned off first saves what its options page has pending.
+    /// UI-level commands (`ui.*`) are handled here, the rest by the engine.
     pub fn execute(&mut self, id: &str, params: Value) -> Result<Value, String> {
-        crate::addins::intercept_execute(self, id, params, |app, id, params| app.execute_inner(id, params))
+        crate::addins::execute(self, id, params)
     }
 
-    /// [`WordApp::execute`] apart from turning add-ins on or off.
-    fn execute_inner(&mut self, id: &str, params: Value) -> Result<Value, String> {
+    /// [`WordApp::execute`] body after add-in / update intercepts.
+    pub(crate) fn execute_inner(&mut self, id: &str, params: Value) -> Result<Value, String> {
         self.clear_command_targets(id);
         if let Some(error) = self.document_required_error(id) {
             return Err(error);
@@ -155,9 +146,6 @@ impl WordApp {
             if let Err(e) = &r {
                 self.status(e.clone());
             }
-            return r;
-        }
-        if let Some(r) = update::before_engine_command(self, id, &params) {
             return r;
         }
         // Web: saving and exporting become downloads.
@@ -372,14 +360,6 @@ impl WordApp {
         r
     }
 
-    /// A finished update asked to quit. Run the normal close path (unlike a user quit, it hasn't
-    /// been confirmed against the document as it is now), so a document edited after the update
-    /// worker finished still gets the save prompt. Returns true once the close may begin; false
-    /// when the document is dirty and the prompt was shown (or nothing was pending).
-    pub fn update_quit_requested(&mut self) -> bool {
-        update::quit_requested(self)
-    }
-
     fn after_command(&mut self, id: &str) {
         options::sync(self);
         self.canvas.caret_visible_since = now_ms();
@@ -511,7 +491,7 @@ impl WordApp {
         if req.get("close").is_some() {
             self.quit_requested = true;
         }
-        update::handle_ui_request(self, req);
+        crate::addins::after_ui_request(self, req);
         crate::windows::arrange::request(self, req);
     }
 
@@ -544,7 +524,7 @@ impl WordApp {
 
     /// Commands that live in the UI layer.
     pub(crate) fn ui_command(&mut self, id: &str, p: &Value) -> Option<Result<Value, String>> {
-        if let Some(r) = update::wordcraft_command(self, id) {
+        if let Some(r) = crate::addins::wordcraft_command(self, id) {
             return Some(r);
         }
         let s = |k: &str| p.get(k).and_then(Value::as_str);
@@ -1156,7 +1136,7 @@ pub(crate) fn works_without_document(id: &str) -> bool {
             | "ui.displayServer"
             | "ui.statusCount"
             | "ui.checkForUpdates"
-    ) || update::works_without_document(id)
+    ) || crate::addins::works_without_document(id)
         || id.starts_with("help.")
 }
 
