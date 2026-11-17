@@ -22,10 +22,7 @@ pub struct ModuleEn {
 
 impl std::fmt::Debug for ModuleEn {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ModuleEn")
-            .field("spelling_words", &self.spelling.map(|w| w.len()))
-            .field("grammar", &self.grammar.is_some())
-            .finish()
+        f.debug_struct("ModuleEn").field("spelling_words", &self.spelling.map(|w| w.len())).field("grammar", &self.grammar.is_some()).finish()
     }
 }
 
@@ -108,13 +105,7 @@ pub fn check_spelling_with_module(text: &str, opts: &Options, module: ModuleEn) 
 }
 
 /// [`check_text_with`] plus module spelling suppressions and optional English grammar hook.
-pub fn check_text_with_module(
-    text: &str,
-    spans: &[(Range<usize>, ProofLang)],
-    opts: &Options,
-    grammar: bool,
-    module: ModuleEn,
-) -> Vec<Issue> {
+pub fn check_text_with_module(text: &str, spans: &[(Range<usize>, ProofLang)], opts: &Options, grammar: bool, module: ModuleEn) -> Vec<Issue> {
     check_paragraph(text, spans, opts, grammar, false, module)
 }
 

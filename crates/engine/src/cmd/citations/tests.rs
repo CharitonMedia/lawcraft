@@ -831,6 +831,7 @@ fn field_switch_values() {
     assert_eq!(switch_value(r#"TA \l "Doe, 1 U.S. 1 \c" \c 2"#, 'c').as_deref(), Some("2"));
     assert_eq!(switch_value("TOA", 'c'), None);
     assert!(has_switch(r#"TOA \c "1" \p"#, 'p') && !has_switch(r#"TOA \c "1""#, 'p'));
+}
 
 fn lookup_session(tags: &[&str]) -> Session {
     let mut p = Paragraph::new();

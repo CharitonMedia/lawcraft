@@ -11,8 +11,8 @@ use std::io::{Cursor, Read, Write};
 
 use quick_xml::Reader;
 use quick_xml::events::{BytesStart, Event};
-use wordcraft_doc::section::PAGE_NUM_PREFIX_DOCVAR;
 use wordcraft_doc::Document;
+use wordcraft_doc::section::PAGE_NUM_PREFIX_DOCVAR;
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
@@ -410,11 +410,7 @@ fn replace_settings_xml(package: &mut Vec<u8>, settings: Vec<u8>) -> Result<(), 
             deflated
         } else {
             let lower = name.to_ascii_lowercase();
-            if [".png", ".jpg", ".jpeg", ".gif", ".webp"].iter().any(|e| lower.ends_with(e)) {
-                stored
-            } else {
-                deflated
-            }
+            if [".png", ".jpg", ".jpeg", ".gif", ".webp"].iter().any(|e| lower.ends_with(e)) { stored } else { deflated }
         };
         out.start_file(name.as_str(), opts).map_err(|e| LawDocxError::Zip(e.to_string()))?;
         if is_settings {
