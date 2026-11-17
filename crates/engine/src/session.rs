@@ -19,6 +19,7 @@ mod history;
 mod ime;
 mod layout;
 mod lifecycle;
+mod modules;
 mod query;
 mod run;
 mod snapshot;
