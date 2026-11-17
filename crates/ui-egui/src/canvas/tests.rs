@@ -5294,21 +5294,3 @@ fn a_linked_text_box_shows_and_follows_its_link_from_inside() {
     let (start, _) = wordcraft_engine::cmd::insert::bookmark_range(&s.doc, "Spot").unwrap();
     assert!(s.sel.is_collapsed() && s.sel.focus == start, "the caret went to the bookmark: {:?}", s.sel);
 }
-
-/// #1348: a module's command that replaces the document (New Pleading, say) counts comment
-/// text still being typed as an unsaved change and asks first.
-#[test]
-fn a_command_that_replaces_the_document_asks_about_a_pending_comment_draft() {
-    fn replace(s: &mut wordcraft_engine::Session, _: &serde_json::Value) -> wordcraft_engine::CmdResult {
-        s.set_document(wordcraft_doc::Document::new());
-        Ok(json!({}))
-    }
-    let (mut h, id) = comment_harness();
-    h.state_mut().session.install_commands(vec![wordcraft_engine::CommandSpec::new("test.replace", "Replace", "Test", replace).replaces_document()]);
-    h.state_mut().session.dirty = false;
-    click_balloon(&mut h, id);
-    type_in(&mut h, "Typed ");
-    let document = h.state().session.document_id();
-    assert_eq!(h.state_mut().run("test.replace", json!({})).unwrap(), json!({"pending": "saveChanges"}));
-    assert_eq!(h.state().session.document_id(), document, "nothing is replaced yet");
-}

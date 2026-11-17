@@ -1045,3 +1045,5 @@ fn main() -> ExitCode {
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod law_tests;
