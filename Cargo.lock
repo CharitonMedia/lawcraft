@@ -6923,7 +6923,6 @@ dependencies = [
  "unicode-bidi",
  "wordcraft-doc",
  "wordcraft-geom",
- "wordcraft-law-docx",
  "zeroize",
  "zip 3.0.0",
 ]
@@ -7039,6 +7038,7 @@ dependencies = [
  "quick-xml 0.41.0",
  "thiserror 2.0.21",
  "wordcraft-doc",
+ "wordcraft-docx",
  "zip 3.0.0",
 ]
 
@@ -7164,7 +7164,6 @@ dependencies = [
  "wordcraft-engine",
  "wordcraft-fonts",
  "wordcraft-geom",
- "wordcraft-law",
  "wordcraft-layout",
  "wordcraft-render",
  "wordcraft-zotero",
