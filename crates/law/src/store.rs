@@ -273,6 +273,7 @@ pub fn bundled() -> Vec<Profile> {
 }
 
 /// `path` as a string, or an error when it isn't UTF-8.
+#[cfg(not(target_arch = "wasm32"))]
 fn path_str(path: &Path) -> Result<String, LawError> {
     path.to_str().map(str::to_string).ok_or_else(|| LawError::Io(format!("path is not UTF-8: {}", path.display())))
 }
