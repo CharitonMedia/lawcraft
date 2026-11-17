@@ -19,7 +19,7 @@ static TABLE_OF_AUTHORITIES: OnceLock<fn(&mut Session, &Value) -> CmdResult> = O
 static CELL_MARGINS: OnceLock<fn(&mut Session, &Value) -> CmdResult> = OnceLock::new();
 static INSTALLED: OnceLock<()> = OnceLock::new();
 
-fn read_prefix<'a>(v: &'a Value) -> Result<Option<&'a str>, CmdError> {
+fn read_prefix(v: &Value) -> Result<Option<&str>, CmdError> {
     let Some(prefix) = p::str(v, "prefix") else {
         return Ok(None);
     };
