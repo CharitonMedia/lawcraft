@@ -17,7 +17,62 @@ static STYLES_MODIFY: OnceLock<fn(&mut Session, &Value) -> CmdResult> = OnceLock
 static MARK_CITATION: OnceLock<fn(&mut Session, &Value) -> CmdResult> = OnceLock::new();
 static TABLE_OF_AUTHORITIES: OnceLock<fn(&mut Session, &Value) -> CmdResult> = OnceLock::new();
 static CELL_MARGINS: OnceLock<fn(&mut Session, &Value) -> CmdResult> = OnceLock::new();
+static REVIEW_ISSUES: OnceLock<fn(&mut Session, &Value) -> CmdResult> = OnceLock::new();
+static CUSTOMIZE_RIBBON: OnceLock<fn(&mut Session, &Value) -> CmdResult> = OnceLock::new();
 static INSTALLED: OnceLock<()> = OnceLock::new();
+
+/// Merge document lint findings into `review.issues` (add-in platform).
+fn wrap_review_issues(s: &mut Session, v: &Value) -> CmdResult {
+    let Some(orig) = REVIEW_ISSUES.get() else {
+        return Err(CmdError::Failed("review.issues wrap missing".into()));
+    };
+    let core = orig(s, v)?;
+    let mut out = s.lint_findings();
+    if let Some(arr) = core.as_array() {
+        out.extend(arr.iter().cloned());
+    }
+    if out.len() > 500 {
+        out.truncate(500);
+    }
+    Ok(Value::Array(out))
+}
+
+/// Keep installed add-in tabs across Customize the Ribbon reset/load.
+fn wrap_customize_ribbon(s: &mut Session, v: &Value) -> CmdResult {
+    let Some(orig) = CUSTOMIZE_RIBBON.get() else {
+        return Err(CmdError::Failed("tools.customizeRibbon wrap missing".into()));
+    };
+    let mut v2 = v.clone();
+    let mut handled = false;
+    if let Some(x) = v.get("layout") {
+        s.ribbon.replace_layout(crate::RibbonLayout::from_value(x));
+        let reg = Arc::clone(&s.registry);
+        s.ribbon.retain_known(&reg);
+        if let Some(obj) = v2.as_object_mut() {
+            obj.remove("layout");
+        }
+        handled = true;
+    }
+    if v.get("reset").and_then(Value::as_bool) == Some(true) {
+        s.ribbon.reset_ribbon();
+        s.ribbon.reset_qat();
+        if let Some(obj) = v2.as_object_mut() {
+            obj.remove("reset");
+        }
+        handled = true;
+    }
+    let remaining = v2.as_object().is_some_and(|o| !o.is_empty());
+    if remaining {
+        return orig(s, &v2);
+    }
+    if handled {
+        return Ok(json!({
+            "tabs": serde_json::to_value(s.ribbon.tabs().as_ref()).unwrap_or(Value::Null),
+            "qat": s.ribbon.qat(),
+        }));
+    }
+    orig(s, v)
+}
 
 fn read_prefix(v: &Value) -> Result<Option<&str>, CmdError> {
     let Some(prefix) = p::str(v, "prefix") else {
@@ -305,6 +360,8 @@ fn reapply(session: &mut Session) {
         capture_and_replace(session, "references.markCitation", &MARK_CITATION, wrap_mark_citation);
         capture_and_replace(session, "references.tableOfAuthorities", &TABLE_OF_AUTHORITIES, wrap_table_of_authorities);
         capture_and_replace(session, "table.cellMargins", &CELL_MARGINS, wrap_cell_margins);
+        capture_and_replace(session, "review.issues", &REVIEW_ISSUES, wrap_review_issues);
+        capture_and_replace(session, "tools.customizeRibbon", &CUSTOMIZE_RIBBON, wrap_customize_ribbon);
     } else {
         for (id, run) in [
             ("insert.pageNumber", wrap_page_number as fn(&mut Session, &Value) -> CmdResult),
@@ -314,6 +371,8 @@ fn reapply(session: &mut Session) {
             ("references.markCitation", wrap_mark_citation),
             ("references.tableOfAuthorities", wrap_table_of_authorities),
             ("table.cellMargins", wrap_cell_margins),
+            ("review.issues", wrap_review_issues),
+            ("tools.customizeRibbon", wrap_customize_ribbon),
         ] {
             session.replace_command(id, |mut spec| {
                 spec.run = run;
