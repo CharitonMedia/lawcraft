@@ -55,12 +55,7 @@ fn draw_charts(doc: &mut Document) {
 pub fn save(ext: &str, doc: &Document, opts: &crate::io::ExportOptions) -> Option<Result<Vec<u8>, String>> {
     // .docx/.docm/.dotx/.dotm: the extension picks the package flavour Word expects.
     if let Some(flavor) = wordcraft_docx::Flavor::from_ext(ext) {
-        return Some((|| {
-            let mut bytes = wordcraft_docx::write_as(doc, flavor).map_err(|e| e.to_string())?;
-            // LawCraft: write appendix page-number prefixes into w:docVars.
-            wordcraft_law_docx::write_page_num_prefixes(&mut bytes, doc).map_err(|e| e.to_string())?;
-            Ok(bytes)
-        })());
+        return Some(wordcraft_docx::write_as(doc, flavor).map_err(|e| e.to_string()));
     }
     match ext {
         "xml" if opts.word2003 => Some(wordcraft_docx::write_wordml2003(doc).map_err(|e| e.to_string())),

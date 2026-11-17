@@ -128,10 +128,6 @@ thread_local! {
     static SCOPE: RefCell<Option<Scope>> = const { RefCell::new(None) };
 }
 
-#[path = "file_access_automation.rs"]
-mod automation;
-pub use automation::{automation_confined, automation_invoked, invoke_automation, require_human};
-
 /// The roots in force in every thread outside [`confine`] and [`unconfined`].
 static PROCESS: OnceLock<Arc<AutomationRoots>> = OnceLock::new();
 

@@ -30,11 +30,10 @@ pub(super) fn lang_at(runs: &[ProofRun], off: usize) -> wordcraft_proof::ProofLa
 }
 
 /// Spelling and grammar issues in a paragraph, in order: each word in its run's language
-/// ([`wordcraft_proof::check_paragraph`]: spelling, grammar, and optional module supplements),
+/// ([`wordcraft_proof::check_text_with`]: what spelling skips, and grammar only with `grammar`),
 /// and none touching a run left unchecked.
 ///
 /// `list_item` (see [`is_list_item`]) turns off the capital-first-word grammar rule.
-/// Module supplements come from [`crate::proof_module`] (the session keeps it in sync).
 pub fn paragraph_issues(
     p: &Paragraph,
     runs: &[ProofRun],
@@ -48,7 +47,7 @@ pub fn paragraph_issues(
     let text = proof_text(p);
     let spans: Vec<(std::ops::Range<usize>, wordcraft_proof::ProofLang)> = runs.iter().map(|r| (r.range.clone(), r.lang)).collect();
     let skipped = skipped_ranges(runs);
-    let issues = wordcraft_proof::check_paragraph(&text, &spans, spelling, grammar, list_item, crate::proof_module());
+    let issues = wordcraft_proof::check_text_with(&text, &spans, spelling, grammar, list_item);
     if skipped.is_empty() {
         return issues;
     }
@@ -93,7 +92,6 @@ pub(super) fn proof_issues(
     typing: Option<(usize, usize)>,
     list_item: bool,
 ) -> Vec<(usize, usize, bool)> {
-    crate::set_proof_module(opts.module);
     paragraph_issues(p, runs, &opts.spelling, opts.grammar, list_item)
         .into_iter()
         .map(|i| (i.start, i.end, i.kind == wordcraft_proof::IssueKind::Grammar))

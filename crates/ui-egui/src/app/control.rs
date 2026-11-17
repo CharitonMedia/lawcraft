@@ -48,7 +48,6 @@ impl WordApp {
                 control::Outcome::Done(v) => {
                     let _ = reply.send(v);
                 }
-                control::Outcome::Deferred => {}
                 control::Outcome::Screenshot { path } => control::admit_screenshot(self, ctx, path, reply),
             }
         }
