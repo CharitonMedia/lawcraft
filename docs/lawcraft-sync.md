@@ -1,12 +1,13 @@
 # LawCraft and WordCraft: what LawCraft changes in WordCraft's files
 
 LawCraft is WordCraft plus the legal add-in (`crates/law`, `crates/law-ui`). Once a week
-`.github/sync/sync.sh` merges WordCraft's `main`. LawCraft's own crates never conflict; the
-conflicts come from the lines LawCraft changes inside WordCraft's files. This page lists every
-such file, why LawCraft changes it, and what happens when a merge conflicts there.
+`.github/sync/sync.sh` merges WordCraft's newest release tag (highest `vX.Y.Z`). LawCraft's own
+crates never conflict; the conflicts come from the lines LawCraft changes inside WordCraft's
+files. This page lists every such file, why LawCraft changes it, and what happens when a merge
+conflicts there.
 
 **Fixed by the sync on its own** means `sync.sh` resolves the conflict and the sync's gate still
-has to pass before anything is pushed. **By hand** means the sync stops, opens the "Nightly
+has to pass before anything is pushed. **By hand** means the sync stops, opens the "Weekly
 WordCraft sync needs attention" issue and assigns it, so GitHub emails the maintainer; the fix is
 to take WordCraft's version and add LawCraft's lines back where WordCraft now keeps that code.
 

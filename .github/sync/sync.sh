@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Merge WordCraft's main into LawCraft's main (run by .github/workflows/sync.yml).
+# Merge WordCraft's newest release tag into LawCraft's main (run by .github/workflows/sync.yml).
 #
 # Resolves the conflicts LawCraft expects on every merge (docs/lawcraft-sync.md lists them):
 # README.md, NOTICE and release.yml (LawCraft's), Cargo.lock (WordCraft's, then cargo adds LawCraft's crates
@@ -10,15 +10,35 @@ set -euo pipefail
 out="${GITHUB_OUTPUT:-/dev/stdout}"
 
 git remote get-url upstream >/dev/null 2>&1 || git remote add upstream https://github.com/storytold/wordcraft.git
-git fetch --quiet upstream main
-if git merge-base --is-ancestor upstream/main HEAD; then
-  echo "LawCraft already has WordCraft $(git rev-parse --short upstream/main)"
+git fetch --quiet upstream --tags
+
+# Prefer pure vMAJOR.MINOR.PATCH (stable finals). Fall back to prerelease tags only if none exist.
+pick_newest_release_tag() {
+  local tags pure
+  tags="$(git ls-remote --tags --refs upstream 'v*' | awk '{print $2}' | sed 's|refs/tags/||')"
+  if [ -z "$tags" ]; then
+    echo "error: no v* tags on upstream" >&2
+    return 1
+  fi
+  pure="$(printf '%s\n' "$tags" | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' || true)"
+  if [ -n "$pure" ]; then
+    printf '%s\n' "$pure" | sort -V | tail -n 1
+  else
+    printf '%s\n' "$tags" | sort -V | tail -n 1
+  fi
+}
+
+tag="$(pick_newest_release_tag)"
+git fetch --quiet upstream "refs/tags/${tag}:refs/tags/${tag}"
+
+if git merge-base --is-ancestor "$tag" HEAD; then
+  echo "LawCraft already has WordCraft $tag ($(git rev-parse --short "$tag"))"
   echo "result=current" >>"$out"
   exit 0
 fi
 
-msg="Merge WordCraft main ($(git rev-parse --short upstream/main))"
-if ! git merge --no-edit -m "$msg" upstream/main; then
+msg="Merge WordCraft $tag ($(git rev-parse --short "$tag"))"
+if ! git merge --no-edit -m "$msg" "$tag"; then
   while IFS= read -r f; do
     case "$f" in
       README.md | NOTICE) git checkout --ours -- "$f" && git add -- "$f" ;;
@@ -48,4 +68,4 @@ if ! git diff --quiet -- Cargo.lock; then
   git commit --quiet -m "Cargo.lock after merging WordCraft" -- Cargo.lock
 fi
 echo "result=merged" >>"$out"
-echo "merged WordCraft $(git rev-parse --short upstream/main)"
+echo "merged WordCraft $tag ($(git rev-parse --short "$tag"))"
