@@ -19,9 +19,18 @@ impl Session {
     }
 
     /// Set English module supplements for proofing (layout Review commands and on-screen squiggles).
+    ///
+    /// Only stores the value on this session. Layout and Review proofing install it for the
+    /// duration of their work via [`wordcraft_proof::enter_session_module`], so another session
+    /// created on the same thread cannot clear or replace this one's module.
     pub fn set_module_en(&mut self, module: wordcraft_proof::ModuleEn) {
         self.module_en = module;
-        wordcraft_proof::set_session_module(module);
+    }
+
+    /// Run `f` with this session's [`Self::module_en`] installed for proofing on this thread.
+    pub fn with_proof_module<R>(&self, f: impl FnOnce() -> R) -> R {
+        let _guard = wordcraft_proof::enter_session_module(self.module_en);
+        f()
     }
 
     /// Install commands an optional module supplies (`law.profiles.apply` from LawCraft, say).
@@ -199,11 +208,10 @@ impl Session {
 }
 
 /// LawCraft fields for a new session: lint map from the document state, empty export checks, and
-/// default module English supplements.
+/// default module English supplements. Does not touch the proofing thread-local — that is scoped
+/// per layout / Review call from the session that owns the module.
 pub(super) fn init_fields(
     lint_findings: std::collections::BTreeMap<String, Vec<serde_json::Value>>,
 ) -> (std::collections::BTreeMap<String, Vec<serde_json::Value>>, Vec<(String, serde_json::Value)>, wordcraft_proof::ModuleEn) {
-    let module_en = wordcraft_proof::ModuleEn::default();
-    wordcraft_proof::set_session_module(module_en);
-    (lint_findings, Vec::new(), module_en)
+    (lint_findings, Vec::new(), wordcraft_proof::ModuleEn::default())
 }

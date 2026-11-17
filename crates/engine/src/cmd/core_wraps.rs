@@ -18,14 +18,18 @@ static MARK_CITATION: OnceLock<fn(&mut Session, &Value) -> CmdResult> = OnceLock
 static TABLE_OF_AUTHORITIES: OnceLock<fn(&mut Session, &Value) -> CmdResult> = OnceLock::new();
 static CELL_MARGINS: OnceLock<fn(&mut Session, &Value) -> CmdResult> = OnceLock::new();
 static REVIEW_ISSUES: OnceLock<fn(&mut Session, &Value) -> CmdResult> = OnceLock::new();
+static REVIEW_SPELLING: OnceLock<fn(&mut Session, &Value) -> CmdResult> = OnceLock::new();
+static REVIEW_SUGGESTIONS: OnceLock<fn(&mut Session, &Value) -> CmdResult> = OnceLock::new();
 static CUSTOMIZE_RIBBON: OnceLock<fn(&mut Session, &Value) -> CmdResult> = OnceLock::new();
 static INSTALLED: OnceLock<()> = OnceLock::new();
 
-/// Merge document lint findings into `review.issues` (add-in platform).
+/// Merge document lint findings into `review.issues` (add-in platform), with this session's
+/// proofing module scoped for the core call.
 fn wrap_review_issues(s: &mut Session, v: &Value) -> CmdResult {
     let Some(orig) = REVIEW_ISSUES.get() else {
         return Err(CmdError::Failed("review.issues wrap missing".into()));
     };
+    let _guard = wordcraft_proof::enter_session_module(s.module_en);
     let core = orig(s, v)?;
     let mut out = s.lint_findings();
     if let Some(arr) = core.as_array() {
@@ -35,6 +39,22 @@ fn wrap_review_issues(s: &mut Session, v: &Value) -> CmdResult {
         out.truncate(500);
     }
     Ok(Value::Array(out))
+}
+
+fn wrap_review_spelling(s: &mut Session, v: &Value) -> CmdResult {
+    let Some(orig) = REVIEW_SPELLING.get() else {
+        return Err(CmdError::Failed("review.spelling wrap missing".into()));
+    };
+    let _guard = wordcraft_proof::enter_session_module(s.module_en);
+    orig(s, v)
+}
+
+fn wrap_review_suggestions(s: &mut Session, v: &Value) -> CmdResult {
+    let Some(orig) = REVIEW_SUGGESTIONS.get() else {
+        return Err(CmdError::Failed("review.suggestions wrap missing".into()));
+    };
+    let _guard = wordcraft_proof::enter_session_module(s.module_en);
+    orig(s, v)
 }
 
 /// Keep installed add-in tabs across Customize the Ribbon reset/load.
@@ -361,6 +381,8 @@ fn reapply(session: &mut Session) {
         capture_and_replace(session, "references.tableOfAuthorities", &TABLE_OF_AUTHORITIES, wrap_table_of_authorities);
         capture_and_replace(session, "table.cellMargins", &CELL_MARGINS, wrap_cell_margins);
         capture_and_replace(session, "review.issues", &REVIEW_ISSUES, wrap_review_issues);
+        capture_and_replace(session, "review.spelling", &REVIEW_SPELLING, wrap_review_spelling);
+        capture_and_replace(session, "review.suggestions", &REVIEW_SUGGESTIONS, wrap_review_suggestions);
         capture_and_replace(session, "tools.customizeRibbon", &CUSTOMIZE_RIBBON, wrap_customize_ribbon);
     } else {
         for (id, run) in [
@@ -372,6 +394,8 @@ fn reapply(session: &mut Session) {
             ("references.tableOfAuthorities", wrap_table_of_authorities),
             ("table.cellMargins", wrap_cell_margins),
             ("review.issues", wrap_review_issues),
+            ("review.spelling", wrap_review_spelling),
+            ("review.suggestions", wrap_review_suggestions),
             ("tools.customizeRibbon", wrap_customize_ribbon),
         ] {
             session.replace_command(id, |mut spec| {

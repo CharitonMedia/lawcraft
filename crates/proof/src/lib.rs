@@ -1,8 +1,10 @@
 //! LawCraft's proofing facade: re-exports [`craft_proof`] and adds per-session [`ModuleEn`]
 //! supplements (legal word list and grammar hooks) that craft-proof itself does not carry.
 //!
-//! [`check_text_with`] injects the session module from [`set_session_module`] so WordCraft's
+//! [`check_text_with`] reads the module installed by [`enter_session_module`] so WordCraft's
 //! layout crate can stay byte-identical to upstream while still applying LawCraft proofing.
+//! Sessions must enter their own [`ModuleEn`] only for the duration of that session's layout or
+//! Review proofing (a [`SessionModuleGuard`]), never as a lasting thread-local default.
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
@@ -22,12 +24,24 @@ thread_local! {
     static SESSION_MODULE: Cell<ModuleEn> = const { Cell::new(ModuleEn { spelling: None, grammar: None }) };
 }
 
-/// Set the module supplements [`check_text_with`] applies (session / law install).
-pub fn set_session_module(module: ModuleEn) {
-    SESSION_MODULE.with(|c| c.set(module));
+/// Restores the previous thread-local module when dropped (layout / Review proofing scope).
+pub struct SessionModuleGuard {
+    previous: ModuleEn,
 }
 
-/// The module supplements [`check_text_with`] will use.
+impl Drop for SessionModuleGuard {
+    fn drop(&mut self) {
+        SESSION_MODULE.with(|c| c.set(self.previous));
+    }
+}
+
+/// Install `module` for this thread until the returned guard is dropped.
+pub fn enter_session_module(module: ModuleEn) -> SessionModuleGuard {
+    let previous = SESSION_MODULE.with(|c| c.replace(module));
+    SessionModuleGuard { previous }
+}
+
+/// The module supplements [`check_text_with`] will use (inside an [`enter_session_module`] scope).
 pub fn session_module() -> ModuleEn {
     SESSION_MODULE.with(|c| c.get())
 }
