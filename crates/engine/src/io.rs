@@ -288,7 +288,21 @@ fn open_other_bytes(name: &str, bytes: &[u8], password: Option<&str>, page: &wor
 /// Read a Word package (decrypted with `password` if it is encrypted), bringing in its
 /// alternative format chunks (`w:altChunk`) as Word does when it opens one: see [`import_chunk`].
 pub(crate) fn read_docx(bytes: &[u8], password: Option<&str>) -> Result<Document, wordcraft_docx::DocxError> {
-    wordcraft_docx::read_with(bytes, &wordcraft_docx::ReadOptions { password, chunks: Some(&import_chunk) })
+    // Decrypt once so the LawCraft prefix hook sees the same OOXML package bytes the reader used.
+    let decrypted;
+    let package: &[u8] = if wordcraft_docx::is_encrypted(bytes) {
+        decrypted = wordcraft_docx::decrypt(bytes, password)?;
+        decrypted.as_slice()
+    } else {
+        bytes
+    };
+    let mut doc = wordcraft_docx::read_with(
+        package,
+        &wordcraft_docx::ReadOptions { password: None, chunks: Some(&import_chunk) },
+    )?;
+    // LawCraft: appendix page-number prefixes ride in w:docVars on the package.
+    wordcraft_law_docx::apply_page_num_prefixes(&mut doc, package).map_err(|e| wordcraft_docx::DocxError::Zip(e.to_string()))?;
+    Ok(doc)
 }
 
 /// An alternative format chunk in a format the docx reader leaves to the format importers, as a

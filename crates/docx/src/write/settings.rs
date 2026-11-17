@@ -104,30 +104,6 @@ pub(super) fn settings_xml(doc: &Document, footnotes: bool, endnotes: bool, temp
     w.val("w:characterSpacingControl", "doNotCompress");
     write_note_settings(&mut w, s, s_notes, footnotes, endnotes);
     write_compatibility_settings(&mut w, doc);
-    // §17.15.1.20 document variables. Section-scoped properties that `w:sectPr` has no slot for
-    // (the page-number prefix) ride here; any other document variables are preserved as read.
-    let reserved = wordcraft_doc::section::PAGE_NUM_PREFIX_DOCVAR;
-    let section_vars = section_prefix_vars(doc);
-    // The reader stops at `MAX_DOC_VARS` total in file order, and the section prefixes are written
-    // after the saved variables: reserve one slot per prefix so a full saved list cannot crowd
-    // them past the reader's cap and silently lose the page numbering.
-    let saved: Vec<(&String, &String)> = s
-        .doc_vars
-        .iter()
-        .filter(|(n, _)| !n.starts_with(reserved))
-        .map(|(n, v)| (n, v))
-        .take(crate::MAX_DOC_VARS.saturating_sub(section_vars.len()))
-        .collect();
-    if !saved.is_empty() || !section_vars.is_empty() {
-        w.open("w:docVars", &[]);
-        for (name, val) in saved {
-            w.empty("w:docVar", &[("w:name", name.as_str()), ("w:val", val.as_str())]);
-        }
-        for (name, val) in &section_vars {
-            w.empty("w:docVar", &[("w:name", name.as_str()), ("w:val", val.as_str())]);
-        }
-        w.close("w:docVars");
-    }
     if let Some(m) = &s.math {
         math::math_pr(&mut w, m);
     }
@@ -175,24 +151,6 @@ fn write_compatibility_settings(w: &mut W, doc: &Document) {
     let mode = doc.settings.compat_mode.clamp(11, 15).to_string();
     w.empty("w:compatSetting", &[("w:name", "compatibilityMode"), ("w:uri", "http://schemas.microsoft.com/office/word"), ("w:val", &mode)]);
     w.close("w:compat");
-}
-
-/// The `w:docVar` name/value pairs for each section's page-number prefix (`vec` of pairs, in
-/// section order). `w:sectPr` has no extension point, so the prefix rides in `w:docVars`
-/// (see [`wordcraft_doc::section::PAGE_NUM_PREFIX_DOCVAR`]).
-fn section_prefix_vars(doc: &Document) -> Vec<(String, String)> {
-    doc.sections()
-        .iter()
-        .enumerate()
-        .filter_map(|(i, (_, sp))| {
-            let prefix = sp.page_num_prefix.as_deref().filter(|p| !p.is_empty())?;
-            if prefix.chars().count() > crate::MAX_DOC_VAR_VALUE {
-                return None;
-            }
-            Some((format!("{}{i}", wordcraft_doc::section::PAGE_NUM_PREFIX_DOCVAR), prefix.to_string()))
-        })
-        .take(crate::MAX_DOC_VARS)
-        .collect()
 }
 
 /// Is `d` a usable `w16cid:durableId`: 1–8 hex digits, below 0x7FFFFFFF, not 0?

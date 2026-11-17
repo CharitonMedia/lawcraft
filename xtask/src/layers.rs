@@ -40,8 +40,10 @@ pub const TABLE: &[(&str, Class)] = &[
     ("metafile", Class::Layer(1)),
     ("layout", Class::Layer(2)),
     ("docx", Class::Layer(2)),
+    ("law-docx", Class::Layer(2)),
     ("docbin", Class::Layer(2)),
     ("formats", Class::Layer(2)),
+    ("proof", Class::Layer(2)),
     ("render", Class::Layer(3)),
     ("pdf", Class::Layer(3)),
     ("engine", Class::Layer(4)),
@@ -62,7 +64,7 @@ pub const TABLE: &[(&str, Class)] = &[
 /// The L0 foundation is a small chain: `raster` builds on `color` and
 /// `geom`, which the §3 diagram draws on one line. The GPU backend (`gpu`)
 /// reuses the CPU reference (`compose`) for LUTs and parity tests.
-pub const INTRA_LAYER_ORDER: &[&[&str]] = &[&["doc", "fonts"], &["ui-egui", "law-ui"]];
+pub const INTRA_LAYER_ORDER: &[&[&str]] = &[&["doc", "fonts"], &["docx", "law-docx"], &["ui-egui", "law-ui"]];
 
 fn intra_layer_allowed(from: &str, to: &str) -> bool {
     let (from, to) = (short_name(from), short_name(to));

@@ -1,6 +1,7 @@
 //! A section's page-number prefix (`page_num_prefix`) rides in Word's document variables
 //! (`w:settings/w:docVars`), because `w:sectPr` has no extension slot: emitting `w:extLst` or a
-//! `w:pgNumPrefix` element there is not valid OOXML. The value still round-trips.
+//! `w:pgNumPrefix` element there is not valid OOXML. The value still round-trips through
+//! LawCraft's `wordcraft_law_docx` package hooks (engine io calls the same functions).
 
 use std::io::Read;
 
@@ -9,6 +10,21 @@ use quick_xml::events::Event;
 use wordcraft_doc::section::{PAGE_NUM_PREFIX_DOCVAR, SectionProps};
 use wordcraft_doc::{Document, InlineObject, Paragraph, PartKind, para_block};
 use wordcraft_docx::{read, write};
+use wordcraft_law_docx::{MAX_DOC_VARS, apply_page_num_prefixes, write_page_num_prefixes};
+
+/// Write then patch prefixes into the package (as the engine save path does).
+fn save(doc: &Document) -> Vec<u8> {
+    let mut bytes = write(doc).expect("write");
+    write_page_num_prefixes(&mut bytes, doc).expect("prefix write");
+    bytes
+}
+
+/// Read then apply prefixes from the package (as the engine open path does).
+fn open(bytes: &[u8]) -> Document {
+    let mut doc = read(bytes).expect("read");
+    apply_page_num_prefixes(&mut doc, bytes).expect("prefix apply");
+    doc
+}
 
 /// One part of a written package as text.
 fn part(bytes: Vec<u8>, name: &str) -> String {
@@ -80,7 +96,7 @@ fn children_of(xml: &str, parent: &str) -> Vec<String> {
 
 #[test]
 fn page_num_prefix_is_a_document_variable_not_an_invalid_section_child() {
-    let bytes = write(&doc_with_prefix("A")).expect("write");
+    let bytes = save(&doc_with_prefix("A"));
     let doc_xml = part(bytes.clone(), "word/document.xml");
     assert!(!doc_xml.contains("w:pgNumPrefix"), "must not emit the invalid section element: {doc_xml}");
     assert!(!doc_xml.contains("w:extLst"), "must not add an extension to w:sectPr: {doc_xml}");
@@ -91,7 +107,7 @@ fn page_num_prefix_is_a_document_variable_not_an_invalid_section_child() {
 
 #[test]
 fn every_sectpr_child_is_valid_and_docvars_holds_only_docvar() {
-    let bytes = write(&doc_with_prefix("A")).expect("write");
+    let bytes = save(&doc_with_prefix("A"));
     let doc_xml = part(bytes.clone(), "word/document.xml");
     // ECMA-376 (WordprocessingML) CT_SectPr: the only permitted children of w:sectPr.
     let allowed = [
@@ -132,7 +148,7 @@ fn every_sectpr_child_is_valid_and_docvars_holds_only_docvar() {
 #[test]
 fn page_num_prefix_round_trips_through_document_variables() {
     let doc = doc_with_prefix("Add. ");
-    let back = read(&write(&doc).expect("write")).expect("read");
+    let back = open(&save(&doc));
     assert_eq!(sect(&back).page_num_prefix.as_deref(), Some("Add. "));
     // The consumed variable does not linger on the re-read document.
     assert!(back.settings.doc_vars.is_empty(), "{:?}", back.settings.doc_vars);
@@ -142,7 +158,7 @@ fn page_num_prefix_round_trips_through_document_variables() {
 fn other_document_variables_are_preserved_but_reserved_ones_are_consumed() {
     let mut doc = doc_with_prefix("A");
     doc.settings.doc_vars.push(("MyVar".into(), "kept".into()));
-    let back = read(&write(&doc).expect("write")).expect("read");
+    let back = open(&save(&doc));
     assert_eq!(back.settings.doc_vars, vec![("MyVar".to_string(), "kept".to_string())]);
     assert_eq!(sect(&back).page_num_prefix.as_deref(), Some("A"));
 }
@@ -152,8 +168,8 @@ fn section_prefix_survives_a_full_document_variable_list() {
     // The reader caps the total number of document variables. A full ordinary list must not crowd
     // the prefix out, or a document's page numbering is lost the next time it is opened.
     let mut doc = doc_with_prefix("A");
-    doc.settings.doc_vars = (0..wordcraft_docx::MAX_DOC_VARS).map(|i| (format!("Var{i}"), "x".to_string())).collect();
-    let back = read(&write(&doc).expect("write")).expect("read");
+    doc.settings.doc_vars = (0..MAX_DOC_VARS).map(|i| (format!("Var{i}"), "x".to_string())).collect();
+    let back = open(&save(&doc));
     assert_eq!(sect(&back).page_num_prefix.as_deref(), Some("A"), "the section prefix must survive a full variable list");
-    assert_eq!(back.settings.doc_vars.len(), wordcraft_docx::MAX_DOC_VARS - 1, "the ordinary variables fill only what the section prefix leaves");
+    assert_eq!(back.settings.doc_vars.len(), MAX_DOC_VARS - 1, "the ordinary variables fill only what the section prefix leaves");
 }

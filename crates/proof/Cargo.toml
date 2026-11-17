@@ -1,0 +1,13 @@
+[package]
+name = "wordcraft-proof"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "LawCraft proofing facade: craft-proof plus per-session ModuleEn supplements"
+
+[lints]
+workspace = true
+
+[dependencies]
+# Same craft-proof rev WordCraft pins as wordcraft-proof.
+craft-proof = { package = "craft-proof", git = "https://github.com/storytold/craft-libs", rev = "01315d9c92b5b0e69082d35ca56099461a1efd45", version = "=0.1.0" }

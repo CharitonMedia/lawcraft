@@ -6813,7 +6813,6 @@ dependencies = [
  "chrono",
  "clipboard-win",
  "craft-print",
- "craft-proof",
  "craft-update",
  "dispatch2",
  "eframe",
@@ -6841,6 +6840,7 @@ dependencies = [
  "wordcraft-fonts",
  "wordcraft-law",
  "wordcraft-law-ui",
+ "wordcraft-proof",
  "wordcraft-ui-egui",
  "x11-dl",
  "x11rb",
@@ -6923,6 +6923,7 @@ dependencies = [
  "unicode-bidi",
  "wordcraft-doc",
  "wordcraft-geom",
+ "wordcraft-law-docx",
  "zeroize",
  "zip 3.0.0",
 ]
@@ -6935,7 +6936,6 @@ dependencies = [
  "chrono",
  "craft-font-catalog",
  "craft-font-store",
- "craft-proof",
  "encoding_rs",
  "getrandom 0.3.4",
  "image",
@@ -6955,8 +6955,10 @@ dependencies = [
  "wordcraft-fonts",
  "wordcraft-formats",
  "wordcraft-geom",
+ "wordcraft-law-docx",
  "wordcraft-layout",
  "wordcraft-pdf",
+ "wordcraft-proof",
  "wordcraft-render",
  "zeroize",
  "zip 3.0.0",
@@ -7015,7 +7017,6 @@ dependencies = [
 name = "wordcraft-law"
 version = "0.18.1"
 dependencies = [
- "craft-proof",
  "image",
  "log",
  "proptest",
@@ -7028,6 +7029,18 @@ dependencies = [
  "wordcraft-engine",
  "wordcraft-geom",
  "wordcraft-pdf",
+ "wordcraft-proof",
+]
+
+[[package]]
+name = "wordcraft-law-docx"
+version = "0.18.1"
+dependencies = [
+ "quick-xml 0.41.0",
+ "thiserror 2.0.21",
+ "wordcraft-doc",
+ "wordcraft-docx",
+ "zip 3.0.0",
 ]
 
 [[package]]
@@ -7048,7 +7061,6 @@ dependencies = [
 name = "wordcraft-layout"
 version = "0.18.1"
 dependencies = [
- "craft-proof",
  "image",
  "js-sys",
  "kurbo",
@@ -7062,6 +7074,7 @@ dependencies = [
  "wordcraft-fonts",
  "wordcraft-geom",
  "wordcraft-metafile",
+ "wordcraft-proof",
 ]
 
 [[package]]
@@ -7103,6 +7116,13 @@ dependencies = [
  "wordcraft-geom",
  "wordcraft-layout",
  "wordcraft-metafile",
+]
+
+[[package]]
+name = "wordcraft-proof"
+version = "0.1.0"
+dependencies = [
+ "craft-proof",
 ]
 
 [[package]]
