@@ -87,7 +87,7 @@ impl Session {
             lint_findings: lint_from_doc,
         } = DocState::new(doc, 1, ViewState::default());
         let (lint_findings, export_check_commands, module_en) = super::modules::init_fields(lint_from_doc);
-        Session {
+        let mut session = Session {
             doc,
             sel,
             view,
@@ -184,6 +184,8 @@ impl Session {
             lint_findings,
             export_check_commands,
             module_en,
-        }
+        };
+        crate::cmd::install_core_wraps(&mut session);
+        session
     }
 }

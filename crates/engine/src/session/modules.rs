@@ -12,10 +12,16 @@ impl Session {
         self.prefs.module_enabled(id)
     }
 
+    /// Insert a generated list field (TOC / TOA / bibliography / index) via the core helper.
+    /// LawCraft wraps `references.tableOfAuthorities` and calls this with TOA switches.
+    pub fn insert_generated_list(&mut self, instr: &str, title: &str) -> Result<(), crate::CmdError> {
+        crate::cmd::citations::generated_list(self, instr, title)
+    }
+
     /// Set English module supplements for proofing (layout Review commands and on-screen squiggles).
     pub fn set_module_en(&mut self, module: wordcraft_proof::ModuleEn) {
         self.module_en = module;
-        wordcraft_layout::set_proof_module(module);
+        wordcraft_proof::set_session_module(module);
     }
 
     /// Install commands an optional module supplies (`law.profiles.apply` from LawCraft, say).
@@ -197,5 +203,7 @@ impl Session {
 pub(super) fn init_fields(
     lint_findings: std::collections::BTreeMap<String, Vec<serde_json::Value>>,
 ) -> (std::collections::BTreeMap<String, Vec<serde_json::Value>>, Vec<(String, serde_json::Value)>, wordcraft_proof::ModuleEn) {
-    (lint_findings, Vec::new(), wordcraft_proof::ModuleEn::default())
+    let module_en = wordcraft_proof::ModuleEn::default();
+    wordcraft_proof::set_session_module(module_en);
+    (lint_findings, Vec::new(), module_en)
 }
