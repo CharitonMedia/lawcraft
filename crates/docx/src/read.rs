@@ -311,6 +311,7 @@ fn read_opened_in(pkg: &Package, chunks: ChunkState) -> Result<(Document, usize,
             wm.size = None;
         }
     }
+
     let core = root_rels.by_type(rt::CORE).map(|x| x.target.clone()).unwrap_or_else(|| "docProps/core.xml".into());
     r.read_core(&core);
     if let Some(app) = root_rels.by_type(rt::APP).map(|x| x.target.clone()) {

@@ -357,7 +357,7 @@ fn scan_tag_close(bytes: &[u8], from: usize) -> Option<usize> {
 fn find_matching_end(bytes: &[u8], mut i: usize, local: &str) -> Option<usize> {
     let mut depth = 1usize;
     while i < bytes.len() {
-        let Some(rel) = find_byte(bytes, i, b'<') else { return None };
+        let rel = find_byte(bytes, i, b'<')?;
         i = rel;
         let after = i.saturating_add(1);
         if bytes.get(after) == Some(&b'!') || bytes.get(after) == Some(&b'?') {
