@@ -25,8 +25,6 @@ workspace files outside that count may still differ; they are listed below.
 | File | Why it had to change | Lines |
 |---|---|---|
 | `crates/engine/src/session/layout.rs` | Scope `module_en` with `enter_session_module` around squiggle/layout proofing so a second `Session::new` on the same thread cannot clear LawCraft session A's module (thread-local bleed). Also copy `module_en` into `preview_layout`. | +3 |
-| `crates/ui-egui/src/dialogs.rs` | Silence wasm unused re-exports of `block_behind` / `forget_nudge` (only used by desktop `file_browser`). Same 2 warnings on bare WordCraft `v0.18.1`. | +3 |
-| `crates/ui-egui/src/theme.rs` | Silence wasm unused `system_arabic` (native-only system Arabic font path), matching the existing `system_cjk` / `prefer_hant` pattern. Same warning on bare `v0.18.1`. | +2 |
 
 LawCraft-owned **new** modules (not WordCraft files; they do not appear in
 `--diff-filter=M`) hold the bulk: `crates/engine/src/{hooks,lint,update,law_tests,tests_hooks,
@@ -110,7 +108,7 @@ re-exports). Implementation lives in LawCraft-owned `import.rs`, `extract.rs`,
 `crates/ui-egui/src/app/prefs.rs`, `crates/ui-egui/src/backstage.rs`,
 `crates/ui-egui/src/control/handler.rs` (`invoke_automation`),
 `crates/ui-egui/src/file_dialogs.rs`, `crates/ui-egui/src/i18n.rs` (rebrand helpers),
-`crates/ui-egui/src/dialogs.rs` / `theme.rs` (wasm unused-warning fixes; Pass 3),
+
 `crates/ui-egui/src/options.rs` (File › Options › Add-ins),
 `crates/ui-egui/src/window_ui.rs`.
 

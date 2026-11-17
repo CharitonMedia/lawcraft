@@ -641,8 +641,6 @@ pub fn font_definitions_language_arabic(
         data.index = f.index;
         add_cjk(&mut fonts, format!("system {}", f.family), data);
     }
-    #[cfg(target_arch = "wasm32")]
-    let _ = system_arabic;
     // Symbols and emoji fall back to egui's defaults (kept in the families).
     fonts
 }
