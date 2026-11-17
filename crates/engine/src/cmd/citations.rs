@@ -14,6 +14,7 @@ use crate::{CmdError, CmdResult, CommandSpec, Selection, Session, p};
 
 mod cross_refs;
 mod generated;
+mod toa_law;
 mod render;
 mod sources;
 mod styles;
@@ -23,7 +24,8 @@ pub use cross_refs::{caption_labels, ref_targets};
 pub use generated::ENTRY_STYLE;
 pub(crate) use generated::generated_list;
 use generated::table_of_figures;
-pub use generated::{figures_instr, ta_field, update_generated};
+pub use generated::{figures_instr, update_generated};
+pub use toa_law::ta_field;
 pub use render::{cite, entry};
 pub use sources::update_citations;
 use sources::{citation, sources};
