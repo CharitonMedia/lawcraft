@@ -14,9 +14,10 @@ has to pass before anything is pushed. **By hand** means the sync stops, opens t
 WordCraft sync needs attention" issue and assigns it; the fix is to take WordCraft's version and
 add LawCraft's lines back where WordCraft now keeps that code.
 
-Last checked against WordCraft `v0.18.1` (`079f478b`), 2026-11-17. Remaining WordCraft-path edits
-are still above the long-term target of ~40 source files; icon assets count as one row. Further
-moves into `crates/law*` continue after this sync lands.
+Last checked against WordCraft `v0.18.1` (`079f478b`), 2026-11-17. About **137** WordCraft-path
+files still differ (icon assets count as one `assets/app-icon/*` row; `crates/law*`,
+`crates/law-docx`, and `crates/proof` excluded). Long-term target is under ~40 edited source
+files. Further moves into `crates/law*` continue after this sync lands.
 
 ## Fixed by the sync on its own
 
@@ -45,9 +46,10 @@ moves into `crates/law*` continue after this sync lands.
 ### Workspace and tooling
 
 `Cargo.toml` (law / law-ui / law-docx / proof path deps), `xtask/src/layers.rs` (layer table),
-`.github/sync/sync.sh`, `.github/sync/known_fixes.py`, `.github/workflows/sync.yml`,
-`.github/workflows/build-release.yml`, `.github/workflows/sonarcloud.yml`,
-`.github/release/stamp_version.py`. LawCraft deletes WordCraft's `.github/dependabot.yml`.
+`.github/sync/sync.sh`, `.github/sync/known_fixes.py`, `.github/sync/check_sync_list.py`,
+`.github/workflows/sync.yml`, `.github/workflows/build-release.yml`,
+`.github/workflows/sonarcloud.yml`, `.github/release/stamp_version.py`. LawCraft deletes
+WordCraft's `.github/dependabot.yml`.
 
 ### The add-in system (LawCraft's own crates plug in here)
 
@@ -74,7 +76,8 @@ moves into `crates/law*` continue after this sync lands.
 ### Features the legal add-in needs from the engine / doc
 
 - Table of authorities categories and passim: `crates/engine/src/cmd/citations.rs`,
-  `citations/generated.rs`, `citations/tests.rs`, `crates/doc/src/para.rs`.
+  `citations/generated.rs`, `crates/doc/src/para.rs`. Category/passim regression tests live in
+  `crates/law` / `generated.rs` tests (not WordCraft's `citations/tests.rs`).
 - Appendix page numbers (A1, A2…): `crates/doc/src/section.rs` (`page_num_prefix`),
   `crates/doc/src/settings.rs` (`doc_vars` field), `crates/engine/src/io.rs` /
   `io_ext.rs` (one-line hooks to `wordcraft_law_docx`), `crates/docx/tests/page_num_prefix.rs`
@@ -109,12 +112,14 @@ moves into `crates/law*` continue after this sync lands.
 
 ### Tests that still live in WordCraft test files
 
-`crates/engine/src/tests.rs`, `tests/fonts.rs`, `tests_hooks.rs`,
-`cmd/references/tests.rs`, `cmd/tools/tests.rs`, `cmd/citations/tests.rs`,
+`crates/engine/src/tests.rs`, `tests/fonts.rs`, `tests_hooks.rs` (LawCraft-owned hook
+file under the engine crate), `cmd/tools/tests.rs`,
 `crates/doc/src/tests.rs`, `crates/layout/src/tests.rs`, `crates/pdf/src/tests.rs`,
-`crates/ui-egui/src/tests.rs`, `backstage/tests.rs`, `canvas/tests.rs`,
+`crates/ui-egui/src/tests.rs` (still copies `replaces_document` when cloning specs),
+`crates/ui-egui/src/backstage/tests.rs`, `canvas/tests.rs`,
 `file_dialogs/tests.rs`, `control/doc_tests.rs`, `apps/wordcraft-cli/src/tests.rs`.
-Self-contained LawCraft cases continue to move into `crates/law*` / `crates/law-ui` tests.
+Self-contained LawCraft cases continue to move into `crates/law*` / `crates/law-ui`
+tests and `crates/ui-egui/src/law_tests.rs` (LawCraft-owned; not a WordCraft file).
 
 ## In LawCraft's own crates, tied to WordCraft
 
