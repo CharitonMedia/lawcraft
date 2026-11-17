@@ -206,8 +206,8 @@ impl WordApp {
 }
 
 /// True when the command replaces the open document (add-in / LawCraft commands).
-pub(crate) fn replaces_document(app: &WordApp, id: &str) -> bool {
-    app.session.registry.get(id).is_some_and(|c| c.replaces_document)
+pub(crate) fn replaces_document(_app: &WordApp, id: &str) -> bool {
+    wordcraft_engine::command_replaces_document(id)
 }
 
 /// Before a user `run`: an add-in input dialog. Returns `Some` when the command was handled.

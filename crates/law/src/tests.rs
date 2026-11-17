@@ -252,7 +252,7 @@ fn automation_cannot_approve_or_import_verified_profiles() {
     let verified_file = dir.join("verified.json");
     run(&mut s, "law.profiles.approve", json!({"id": "test-auto-court"}));
     run(&mut s, "law.profiles.export", json!({"id": "test-auto-court", "path": verified_file.to_string_lossy()}));
-    wordcraft_engine::file_access::invoke_automation(|| {
+    wordcraft_engine::invoke_automation(|| {
         let e = err(&mut s, "law.profiles.approve", json!({"id": "test-auto-court"})).to_string();
         assert!(e.contains("outside automation"), "{e}");
         let imported = run(&mut s, "law.profiles.import", json!({"path": verified_file.to_string_lossy(), "verified": true}));
@@ -280,8 +280,8 @@ fn a_confined_agent_cannot_import_a_verified_profile() {
 
     let roots = wordcraft_engine::file_access::AutomationRoots::new(Some(read_root.as_path()), None).expect("roots").expect("roots");
     wordcraft_engine::file_access::confine(Some(&roots), || {
-        assert!(wordcraft_engine::file_access::automation_confined());
-        assert!(!wordcraft_engine::file_access::automation_invoked(), "roots alone confine the agent");
+        assert!(wordcraft_engine::automation_confined());
+        assert!(!wordcraft_engine::automation_invoked(), "roots alone confine the agent");
         // The file's own `verified: true` does not survive...
         let imported = run(&mut s, "law.profiles.import", json!({"path": file.to_string_lossy()}));
         assert_eq!(imported["verified"], json!(false), "a confined agent cannot import a verified profile");
@@ -331,7 +331,7 @@ fn missouri_appendix_pages_are_numbered_from_a1() {
 #[test]
 fn law_appendix_create_keeps_the_brief_open() {
     let spec = crate::specs().into_iter().find(|c| c.id == "law.appendix.create").expect("the command");
-    assert!(!spec.replaces_document);
+    assert!(!wordcraft_engine::command_replaces_document(spec.id));
     let mut s = apply_session(MISSOURI, "brief");
     run(&mut s, "text.insert", json!({"text": "Brief text"}));
     let brief = s.document_id();
@@ -928,8 +928,8 @@ fn page_number_prefix_with_x_of_y_keeps_the_prefix() {
 fn text_stories_cover_the_body_and_every_part() {
     use wordcraft_doc::Part;
     let mut d = Document::new();
-    assert_eq!(d.text_stories(), vec![StoryRef::Body]);
+    assert_eq!(crate::text_stories(&d), vec![StoryRef::Body]);
     d.parts.insert(2, Part::default());
     d.parts.insert(1, Part::default());
-    assert_eq!(d.text_stories(), vec![StoryRef::Body, StoryRef::Part(1), StoryRef::Part(2)]);
+    assert_eq!(crate::text_stories(&d), vec![StoryRef::Body, StoryRef::Part(1), StoryRef::Part(2)]);
 }
