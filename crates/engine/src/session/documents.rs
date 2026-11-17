@@ -242,6 +242,7 @@ impl Session {
             widened: _,
             edit_marks: _,
             go_back_step: _,
+            lint_findings: _,
             // Shared by every open document.
             user_dict_path: _,
             clipboard: _,
@@ -297,7 +298,6 @@ impl Session {
             others: _,
             order: _,
             untitled_count: _,
-            lint_findings: _,
             #[cfg(not(target_arch = "wasm32"))]
                 recovery: _,
         } = self;

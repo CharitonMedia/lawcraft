@@ -1,7 +1,7 @@
 use egui_kittest::kittest::Queryable;
 use serde_json::json;
 
-use super::{HOME_TEMPLATES, TEMPLATES, matching_templates};
+use super::{HOME_TEMPLATES, TEMPLATES, matching_templates, report_update_check};
 use crate::{Services, WordApp};
 
 /// #1714: every side-menu item has its own icon, a drawn one (an unknown name would fall back
@@ -1291,4 +1291,42 @@ fn rtl_template_titles_are_right_aligned() {
         wide_thumbnail.max.x,
         wide_text_right,
     );
+}
+
+/// #15 review: a manual check that finds nothing new, or cannot reach GitHub, must say so; only
+/// an available update draws its own notice. Backstage's status bar is hidden, so the answer is
+/// rendered in the update bar too (asserted below).
+#[test]
+fn manual_update_check_reports_current_error_and_failure() {
+    let mut a = WordApp::new(wordcraft_engine::Session::new(wordcraft_doc::Document::new()), Services::default());
+    report_update_check(&mut a, Ok(json!({"status": "current", "current": "0.6.1"})));
+    assert!(a.status_msg.as_ref().is_some_and(|(m, _)| m.contains("up to date")), "{:?}", a.status_msg);
+    report_update_check(&mut a, Ok(json!({"status": "error", "error": wordcraft_engine::update::MSG_CHECK_FAILED, "errorDetail": "dns"})));
+    assert!(a.status_msg.as_ref().is_some_and(|(m, _)| m.contains("reach GitHub")), "{:?}", a.status_msg);
+    report_update_check(&mut a, Err("nope".to_string()));
+    assert!(a.status_msg.as_ref().is_some_and(|(m, _)| m.contains("reach GitHub")), "{:?}", a.status_msg);
+    a.status_msg = None;
+    report_update_check(&mut a, Ok(json!({"status": "available"})));
+    assert!(a.status_msg.is_none(), "the notice bar speaks for itself: {:?}", a.status_msg);
+    assert!(a.update.message.is_none(), "an available update draws its own notice, not the bar message");
+}
+
+/// #15 review: File ▸ Check for updates runs from Backstage, whose status bar is hidden, so the
+/// "up to date" answer must render in the update bar there.
+#[test]
+fn manual_update_check_answer_is_rendered_in_backstage() {
+    let mut a = WordApp::new(wordcraft_engine::Session::new(wordcraft_doc::Document::new()), Services::default());
+    a.run("ui.backstage", json!({"value": true, "page": "home"})).unwrap();
+    report_update_check(&mut a, Ok(json!({"status": "current", "current": "0.6.1"})));
+    assert!(a.update.message.as_deref().is_some_and(|m| m.contains("up to date")), "{:?}", a.update.message);
+    let mut h = egui_kittest::Harness::builder().with_size(egui::vec2(1440.0, 900.0)).build_ui_state(
+        |ui, app: &mut WordApp| {
+            let ctx = ui.ctx().clone();
+            app.logic(&ctx);
+            app.ui(ui);
+        },
+        a,
+    );
+    h.run_steps(4);
+    assert!(h.query_by_label("WordCraft is up to date.").is_some(), "the answer is rendered over Backstage");
 }

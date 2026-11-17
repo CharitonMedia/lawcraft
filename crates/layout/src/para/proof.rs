@@ -30,7 +30,8 @@ pub(super) fn lang_at(runs: &[ProofRun], off: usize) -> wordcraft_proof::ProofLa
 }
 
 /// Spelling and grammar issues in a paragraph, in order: each word in its run's language
-/// ([`wordcraft_proof::check_text_with`]: what spelling skips, grammar with `grammar`), and none touching a run left unchecked.
+/// ([`wordcraft_proof::check_paragraph`]: spelling, grammar, and optional module supplements),
+/// and none touching a run left unchecked.
 ///
 /// `list_item` (see [`is_list_item`]) turns off the capital-first-word grammar rule.
 /// `opts.module` carries optional LawCraft legal-word / court-check supplements.
@@ -41,8 +42,7 @@ pub fn paragraph_issues(p: &Paragraph, runs: &[ProofRun], opts: &crate::ProofOpt
     let text = proof_text(p);
     let spans: Vec<(std::ops::Range<usize>, wordcraft_proof::ProofLang)> = runs.iter().map(|r| (r.range.clone(), r.lang)).collect();
     let skipped = skipped_ranges(runs);
-    let _module = opts.module; // LawCraft legal supplements; wired once ModuleEn lands on craft-proof
-    let issues = wordcraft_proof::check_text_with(&text, &spans, &opts.spelling, opts.grammar, list_item);
+    let issues = wordcraft_proof::check_paragraph(&text, &spans, &opts.spelling, opts.grammar, list_item, opts.module);
     if skipped.is_empty() {
         return issues;
     }
