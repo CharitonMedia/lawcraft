@@ -184,7 +184,6 @@ impl RibbonLayout {
         self.tabs = if tabs == default_tabs() { Vec::new() } else { tabs };
     }
 
-
     /// The Quick Access Toolbar's commands.
     pub fn qat(&self) -> Vec<&str> {
         match &self.qat {
@@ -221,7 +220,6 @@ impl RibbonLayout {
     fn group_index(tab: &TabEntry, name: &str) -> Result<usize, String> {
         tab.groups.iter().position(|g| g.name == name).ok_or_else(|| format!("tab `{}` has no custom group `{name}`", tab.name))
     }
-
 
     /// Add a custom tab (with one empty group) after `after`, or at the end. Returns its name.
     pub fn new_tab(&mut self, name: Option<&str>, after: Option<&str>) -> Result<String, String> {
@@ -367,7 +365,6 @@ impl RibbonLayout {
         })
     }
 
-
     /// Back to the default Quick Access Toolbar.
     pub fn reset_qat(&mut self) {
         self.qat = None;
@@ -455,7 +452,6 @@ mod tests {
         s.run("tools.customizeRibbon", &json!({})).unwrap();
         assert_eq!(s.ui_requests.last(), Some(&json!({"open": "customizeRibbon"})));
     }
-
 
     #[test]
     fn saved_layouts_round_trip_and_junk_is_ignored() {

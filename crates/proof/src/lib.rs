@@ -7,12 +7,12 @@
 #![forbid(unsafe_code)]
 
 pub use craft_proof::{
-    EnglishSource, Issue, IssueKind, Options, PackLocale, ProofLang, MAX_CUSTOM_WORD_CHARS, add_word, affix, bg, check_grammar, check_grammar_in,
+    EnglishSource, Issue, IssueKind, MAX_CUSTOM_WORD_CHARS, Options, PackLocale, ProofLang, add_word, affix, bg, check_grammar, check_grammar_in,
     check_spelling, check_spelling_in, check_spelling_with, check_text, cs, custom_word, dict, dictionary_generation, dictionary_load_error,
     en_variants, english_source, es, has_dictionary, hr, hunspell, hyphen, id, ignore_word, installed_dictionaries, is_correct, is_correct_for,
-    is_correct_in, is_correct_in_with, is_correct_with, it, lang, load_user_dictionary, missing_dictionary, pack_dictionary_file, packs, patterns, pl,
-    pt, remove_word, ru, save_user_dictionary, scowl, set_dictionaries_folder, suggest, suggest_in, tr, unreadable_dictionary, user_dictionary, vi,
-    words,
+    is_correct_in, is_correct_in_with, is_correct_with, it, lang, load_user_dictionary, missing_dictionary, pack_dictionary_file, packs, patterns,
+    pl, pt, remove_word, ru, save_user_dictionary, scowl, set_dictionaries_folder, suggest, suggest_in, tr, unreadable_dictionary, user_dictionary,
+    vi, words,
 };
 
 use std::cell::Cell;

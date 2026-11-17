@@ -4,7 +4,22 @@
 
 use wordcraft_doc::Document;
 
-use super::{OpenedDocument, LocalImages, ext_of, fit_pictures, load_embedded_fonts, open_other_bytes, opened, read_document, region_page};
+use super::{LocalImages, ext_of, fit_pictures, load_embedded_fonts, opened, read_bytes, read_document, region_page};
+
+/// Result of opening a file, including conversion details for formats that must be saved as a copy.
+pub struct OpenedDocument {
+    pub doc: Document,
+    pub encrypted: bool,
+    pub pdf: Option<wordcraft_pdf::import::ImportSummary>,
+}
+
+/// After a Word package save, rewrite reserved appendix page-number prefixes into `w:docVars`.
+pub(super) fn maybe_write_prefixes(ext: &str, mut bytes: Vec<u8>, doc: &Document) -> Result<Vec<u8>, String> {
+    if wordcraft_docx::Flavor::from_ext(ext).is_some() {
+        wordcraft_law_docx::write_page_num_prefixes(&mut bytes, doc).map_err(|e| e.to_string())?;
+    }
+    Ok(bytes)
+}
 
 /// Open a file and report a PDF conversion separately from lossless document opening.
 pub fn open_bytes_report(name: &str, bytes: &[u8], password: Option<&str>) -> Result<OpenedDocument, String> {
@@ -21,7 +36,7 @@ pub fn open_bytes_report_in(name: &str, bytes: &[u8], password: Option<&str>, re
         })?;
         return Ok(OpenedDocument { doc, encrypted: false, pdf: Some(summary) });
     }
-    let (doc, encrypted) = open_other_bytes(name, bytes, password, &region_page(region))?;
+    let (doc, encrypted) = read_bytes(name, bytes, password, &region_page(region))?;
     load_embedded_fonts(&doc);
     Ok(OpenedDocument { doc, encrypted, pdf: None })
 }

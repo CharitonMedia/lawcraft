@@ -292,8 +292,7 @@ pub(crate) fn leave_file_for_tab(app: &mut WordApp, tab: String) {
 
 /// Apply a `ui.backstage` change, letting an add-in's options page save first when leaving it.
 pub(crate) fn set_backstage(app: &mut WordApp, want: bool, page: Option<String>, pane: Option<String>) {
-    let leaving =
-        !want || page.as_deref().is_some_and(|p| p != app.ui.backstage_page) || pane.as_deref().is_some_and(|p| p != app.ui.options_pane);
+    let leaving = !want || page.as_deref().is_some_and(|p| p != app.ui.backstage_page) || pane.as_deref().is_some_and(|p| p != app.ui.options_pane);
     if !leaving || app.leave_addin_page() {
         app.ui.backstage = want;
         if let Some(pg) = page {

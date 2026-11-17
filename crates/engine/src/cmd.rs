@@ -8,13 +8,13 @@ pub mod citations;
 pub mod column;
 pub mod connectors;
 pub mod controls;
+mod core_wraps;
 pub mod design;
 pub mod draw;
 pub mod edit;
 pub mod equation;
 pub mod fields;
 pub mod file;
-mod core_wraps;
 mod file_open;
 pub(crate) use core_wraps::install as install_core_wraps;
 pub mod find_pattern;
@@ -50,8 +50,8 @@ pub mod table_resize;
 pub mod table_style;
 pub mod templates;
 pub mod text;
-pub mod tracked_edit;
 pub mod tools;
+pub mod tracked_edit;
 pub mod update;
 pub mod user_templates;
 pub mod view;
@@ -705,4 +705,3 @@ mod iso_tests {
         let _ = (civil_from_days(i64::MAX), civil_from_days(i64::MIN));
     }
 }
-

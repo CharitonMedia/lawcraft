@@ -237,8 +237,8 @@ pub mod p {
 }
 
 #[cfg(test)]
+mod law_tests;
+#[cfg(test)]
 mod tests;
 #[cfg(test)]
 mod tests_hooks;
-#[cfg(test)]
-mod law_tests;

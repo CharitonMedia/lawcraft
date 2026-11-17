@@ -46,6 +46,7 @@ pub mod citations;
 pub mod cmd;
 pub mod contacts;
 pub mod courts;
+mod doc_ext;
 pub mod footer_title;
 pub mod pleading_paper;
 pub mod pleadings;
@@ -55,7 +56,6 @@ pub mod store;
 pub mod symbols;
 mod toa;
 mod wrap;
-mod doc_ext;
 pub use doc_ext::text_stories;
 
 use wordcraft_engine::Session;

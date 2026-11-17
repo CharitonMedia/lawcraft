@@ -6,7 +6,7 @@ use std::borrow::Cow;
 
 use serde_json::Value;
 
-use super::{CustomGroup, RibbonLayout, TabEntry, clean_name, default_tabs, reserved, same, MAX_TABS};
+use super::{CustomGroup, MAX_TABS, RibbonLayout, TabEntry, clean_name, default_tabs, reserved, same};
 
 impl RibbonLayout {
     /// Load hidden add-in tab names from a saved layout value.

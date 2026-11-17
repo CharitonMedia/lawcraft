@@ -7,7 +7,7 @@ mod script;
 mod session_boot;
 mod update_check;
 
-use law_cli::{apply_opened, ok_findings, report_if_ok, USAGE};
+use law_cli::{USAGE, apply_opened, ok_findings, report_if_ok};
 use session_boot::{headless_session, session, session_law};
 
 use std::ffi::{OsStr, OsString};
@@ -856,6 +856,6 @@ fn main() -> ExitCode {
 }
 
 #[cfg(test)]
-mod tests;
-#[cfg(test)]
 mod law_tests;
+#[cfg(test)]
+mod tests;

@@ -1,9 +1,9 @@
 //! LawCraft-owned PDF searchability tests (kept out of WordCraft's tests.rs).
 
-use wordcraft_doc::para::InlineObject;
-use wordcraft_doc::{Block, CharProps, Document, ListKind, Paragraph, Table, Watermark, para_block};
-use wordcraft_doc::props::NumRef;
 use std::sync::Arc;
+use wordcraft_doc::para::InlineObject;
+use wordcraft_doc::props::NumRef;
+use wordcraft_doc::{Block, CharProps, Document, ListKind, Paragraph, Table, Watermark, para_block};
 
 use crate::*;
 
@@ -373,4 +373,3 @@ fn a_blank_page_does_not_defeat_searchability() {
     assert_eq!(extract_text(&bytes).len(), 2, "the blank page is its own page");
     assert_eq!(text_searchability(&bytes), TextSearchability::Searchable);
 }
-

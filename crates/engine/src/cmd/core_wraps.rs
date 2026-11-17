@@ -54,7 +54,8 @@ fn apply_prefix_to_gallery(s: &mut Session, v: &Value, pfx: &str) -> Result<(), 
     let x_of_y = p::str(v, "format").is_some_and(|f| f.contains("of"));
     let blocks = s.doc.story_mut(story)?;
     let Some(block) = blocks.iter_mut().rev().find(|b| {
-        b.as_para().is_some_and(|p| p.objects.iter().any(|o| matches!(o, InlineObject::Field { instr, .. } if instr.trim_start().starts_with("PAGE"))))
+        b.as_para()
+            .is_some_and(|p| p.objects.iter().any(|o| matches!(o, InlineObject::Field { instr, .. } if instr.trim_start().starts_with("PAGE"))))
     }) else {
         return Ok(());
     };
@@ -228,7 +229,12 @@ fn wrap_cell_margins(s: &mut Session, v: &Value) -> CmdResult {
     super::sel_result(s)
 }
 
-fn capture_and_replace(session: &mut Session, id: &str, slot: &OnceLock<fn(&mut Session, &Value) -> CmdResult>, run: fn(&mut Session, &Value) -> CmdResult) {
+fn capture_and_replace(
+    session: &mut Session,
+    id: &str,
+    slot: &OnceLock<fn(&mut Session, &Value) -> CmdResult>,
+    run: fn(&mut Session, &Value) -> CmdResult,
+) {
     session.replace_command(id, |mut spec| {
         let _ = slot.set(spec.run);
         spec.run = run;

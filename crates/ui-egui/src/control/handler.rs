@@ -1,6 +1,6 @@
 use super::screenshots::render_png;
 use super::{ControlRequest, Value, WordApp, json};
-use wordcraft_engine::{invoke_automation};
+use wordcraft_engine::invoke_automation;
 
 pub enum Outcome {
     Done(Value),

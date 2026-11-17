@@ -4,7 +4,6 @@ use std::io::{BufRead, Read, Write};
 
 use serde_json::{Value, json};
 
-
 use crate::backend::Backend;
 use crate::tools::{call_tool, tool_definitions};
 

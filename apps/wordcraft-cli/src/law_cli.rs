@@ -146,4 +146,3 @@ pub(crate) fn report_if_ok<E>(r: &Result<serde_json::Value, E>) {
         report_findings(v);
     }
 }
-

@@ -153,10 +153,7 @@ fn manual_update_check_reports_current_error_and_failure() {
     let mut a = app();
     update::report_update_check(&mut a, Ok(json!({"status": "current", "current": "0.6.1"})));
     assert!(a.status_msg.as_ref().is_some_and(|(m, _)| m.contains("up to date")), "{:?}", a.status_msg);
-    update::report_update_check(
-        &mut a,
-        Ok(json!({"status": "error", "error": wordcraft_engine::update::MSG_CHECK_FAILED, "errorDetail": "dns"})),
-    );
+    update::report_update_check(&mut a, Ok(json!({"status": "error", "error": wordcraft_engine::update::MSG_CHECK_FAILED, "errorDetail": "dns"})));
     assert!(a.status_msg.as_ref().is_some_and(|(m, _)| m.contains("reach GitHub")), "{:?}", a.status_msg);
     update::report_update_check(&mut a, Err("nope".to_string()));
     assert!(a.status_msg.as_ref().is_some_and(|(m, _)| m.contains("reach GitHub")), "{:?}", a.status_msg);
@@ -195,9 +192,7 @@ fn a_command_that_replaces_the_document_asks_about_a_pending_comment_draft() {
         Ok(json!({}))
     }
     let (mut h, id) = comment_harness();
-    h.state_mut()
-        .session
-        .install_commands(vec![wordcraft_engine::CommandSpec::new("test.replace", "Replace", "Test", replace).replaces_document()]);
+    h.state_mut().session.install_commands(vec![wordcraft_engine::CommandSpec::new("test.replace", "Replace", "Test", replace).replaces_document()]);
     h.state_mut().session.dirty = false;
     click_balloon(&mut h, id);
     type_in(&mut h, "Typed ");
@@ -211,8 +206,7 @@ fn pdf_import_picker_and_report_keep_the_conversion_unsaved() {
     assert!(file_dialogs::open_filters("document")[0].1.contains(&"pdf"));
     let mut app = app();
     let bytes = wordcraft_engine::io::save_bytes("original.pdf", &wordcraft_doc::Document::from_text("Editable in the window")).unwrap();
-    app.run("file.open", json!({"path": "original.pdf", "data": wordcraft_engine::cmd::insert::base64_encode(&bytes)}))
-        .unwrap();
+    app.run("file.open", json!({"path": "original.pdf", "data": wordcraft_engine::cmd::insert::base64_encode(&bytes)})).unwrap();
     let body = app.session.doc.plain_text(wordcraft_doc::StoryRef::Body);
     assert!(body.contains("Editable in the window"));
     assert!(app.session.dirty && app.session.path.is_none());

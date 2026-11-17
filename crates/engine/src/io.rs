@@ -7,7 +7,7 @@ mod safe_save;
 
 #[path = "io_open.rs"]
 mod io_open;
-pub use io_open::{open_bytes_report, open_bytes_report_in, open_path_report, open_path_report_in};
+pub use io_open::{OpenedDocument, open_bytes_report, open_bytes_report_in, open_path_report, open_path_report_in};
 
 /// Formats WordCraft opens.
 pub const OPEN_EXTS: &[&str] = &[
@@ -189,13 +189,6 @@ fn open_binary_doc(bytes: &[u8], password: Option<&str>) -> Result<(Document, bo
     }
 }
 
-/// Result of opening a file, including conversion details for formats that must be saved as a copy.
-pub struct OpenedDocument {
-    pub doc: Document,
-    pub encrypted: bool,
-    pub pdf: Option<wordcraft_pdf::import::ImportSummary>,
-}
-
 /// [`open_bytes`] for a file that may be password-protected: a Word document encrypted with a
 /// password ([MS-OFFCRYPTO] agile or Standard encryption, under any Word extension, or the
 /// Word 97-2003 schemes) is decrypted with
@@ -232,7 +225,7 @@ pub(super) fn load_embedded_fonts(doc: &Document) {
     }
 }
 
-pub(super) fn open_other_bytes(name: &str, bytes: &[u8], password: Option<&str>, page: &wordcraft_doc::SectionProps) -> Result<(Document, bool), String> {
+pub(super) fn read_bytes(name: &str, bytes: &[u8], password: Option<&str>, page: &wordcraft_doc::SectionProps) -> Result<(Document, bool), String> {
     let ext = ext_of(name);
     if matches!(ext.as_str(), "docx" | "docm" | "dotx" | "dotm" | "doc" | "dot") && wordcraft_docx::is_encrypted(bytes) {
         let mut doc = read_docx(bytes, password).map_err(|e| e.to_string())?;
@@ -465,17 +458,10 @@ pub fn save_bytes_opts(name: &str, doc: &Document, opts: &ExportOptions) -> Resu
             Ok(if opts.markup && opts.comments { wordcraft_formats::comments::append("txt", doc, bytes) } else { bytes })
         }
         "json" => serde_json::to_vec_pretty(doc).map_err(|e| e.to_string()),
-        other => {
-            let mut bytes = match crate::io_ext::save(other, doc, opts) {
-                Some(r) => r?,
-                None => return Err(format!("{name}: can't save as `.{other}`")),
-            };
-            // LawCraft: appendix page-number prefixes in w:docVars for Word packages.
-            if wordcraft_docx::Flavor::from_ext(other).is_some() {
-                wordcraft_law_docx::write_page_num_prefixes(&mut bytes, doc).map_err(|e| e.to_string())?;
-            }
-            Ok(bytes)
-        }
+        other => match crate::io_ext::save(other, doc, opts) {
+            Some(r) => io_open::maybe_write_prefixes(other, r?, doc),
+            None => Err(format!("{name}: can't save as `.{other}`")),
+        },
     }
 }
 
@@ -505,7 +491,6 @@ pub fn open_path_with(path: &std::path::Path, password: Option<&str>) -> Result<
 pub fn open_path_in(path: &std::path::Path, password: Option<&str>, region: &wordcraft_geom::Region) -> Result<(Document, bool), String> {
     open_path_report_in(path, password, region).map(|opened| (opened.doc, opened.encrypted))
 }
-
 
 /// Largest document file opened by path.
 #[cfg(not(target_arch = "wasm32"))]
@@ -868,4 +853,3 @@ pub fn save_path_with(path: &std::path::Path, _doc: &Document, _password: Option
 pub fn decode_text(b: &[u8]) -> String {
     wordcraft_formats::txt::decode(b)
 }
-
