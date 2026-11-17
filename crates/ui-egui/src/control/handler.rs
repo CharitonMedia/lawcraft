@@ -1,14 +1,10 @@
 use super::screenshots::render_png;
 use super::{ControlRequest, Value, WordApp, json};
-use wordcraft_engine::file_access;
+use wordcraft_engine::{invoke_automation};
 
 pub enum Outcome {
     Done(Value),
-    /// Reply is sent when a background worker finishes (for example `file.checkForUpdates`).
-    Deferred,
-    Screenshot {
-        path: Option<String>,
-    },
+    Screenshot { path: Option<String> },
 }
 
 fn ok(v: Value) -> Outcome {
@@ -248,12 +244,7 @@ pub fn handle(app: &mut WordApp, ctx: &egui::Context, req: &ControlRequest) -> O
             if let Some(e) = close_refused(app, id, &params) {
                 return err(e);
             }
-            if id == "file.checkForUpdates" && crate::update::can_run_off_thread(app) {
-                // Started or not, it answers on `reply` itself (one reply per request).
-                crate::update::queue_check_control(app, params, ctx, req.reply.clone());
-                return Outcome::Deferred;
-            }
-            file_access::invoke_automation(|| match app.execute(id, params) {
+            invoke_automation(|| match app.execute(id, params) {
                 Ok(v) => ok(v),
                 Err(e) => err(e),
             })
@@ -417,7 +408,7 @@ pub fn handle(app: &mut WordApp, ctx: &egui::Context, req: &ControlRequest) -> O
             if let Some(e) = close_refused(app, other, p) {
                 return err(e);
             }
-            file_access::invoke_automation(|| match app.execute(other, p.clone()) {
+            invoke_automation(|| match app.execute(other, p.clone()) {
                 Ok(v) => ok(v),
                 Err(e) => err(e),
             })

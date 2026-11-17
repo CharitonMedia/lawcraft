@@ -4,7 +4,7 @@
 
 use std::cell::RefCell;
 
-use super::current;
+use crate::file_access::current;
 
 thread_local! {
     /// Nesting depth for [`invoke_automation`]: MCP and other agent entry points.
@@ -12,7 +12,7 @@ thread_local! {
 }
 
 /// Automation filesystem roots are in force on this thread (`confine`, `confine_process`, or the
-/// process roots). Keyboard-driven work runs inside [`super::unconfined`], which clears them.
+/// process roots). Keyboard-driven work runs inside [`crate::file_access::unconfined`], which clears them.
 pub fn automation_confined() -> bool {
     current().is_some()
 }

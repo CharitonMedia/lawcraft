@@ -124,9 +124,8 @@ fn window_close_waits_for_update_worker() {
 }
 
 #[test]
-fn control_update_check_defers_until_worker_finishes() {
+fn control_update_check_reports_current() {
     use std::sync::Arc;
-    use std::time::Duration;
 
     use wordcraft_engine::update::LATEST_API;
 
@@ -138,17 +137,10 @@ fn control_update_check_defers_until_worker_finishes() {
     a.ctx = Some(ctx.clone());
     let body = Arc::clone(&latest);
     a.session.update_http = Some(Arc::new(move |u, _| if u == LATEST_API { Ok(body.as_bytes().to_vec()) } else { Ok(vec![]) }));
-    let (req, rx) = ControlRequest::new("engine.execute", json!({"command": "file.checkForUpdates", "params": {"force": true}}));
-    assert!(matches!(control::handle(&mut a, &ctx, &req), control::Outcome::Deferred));
-    for _ in 0..200 {
-        update::poll(&mut a, &ctx);
-        if !update::worker_busy(&a) {
-            break;
-        }
-        std::thread::sleep(Duration::from_millis(5));
-    }
-    assert!(!update::worker_busy(&a));
-    let reply = rx.recv_timeout(Duration::from_secs(2)).expect("control reply");
+    let (req, _rx) = ControlRequest::new("engine.execute", json!({"command": "file.checkForUpdates", "params": {"force": true}}));
+    let control::Outcome::Done(reply) = control::handle(&mut a, &ctx, &req) else {
+        panic!("update check replies at once on the control channel");
+    };
     assert_eq!(reply.get("ok"), Some(&json!(true)));
     assert_eq!(reply.get("result").and_then(|r| r.get("status")).and_then(Value::as_str), Some("current"));
 }
@@ -224,7 +216,7 @@ fn pdf_import_picker_and_report_keep_the_conversion_unsaved() {
     let body = app.session.doc.plain_text(wordcraft_doc::StoryRef::Body);
     assert!(body.contains("Editable in the window"));
     assert!(app.session.dirty && app.session.path.is_none());
-    assert!(matches!(&app.dialog, Some(dialogs::Dialog::PdfImportReport { warnings }) if !warnings.is_empty()));
+    assert!(app.pdf_import_report.as_ref().is_some_and(|r| !r.warnings.is_empty()));
     app.dialog = None;
     app.run("text.insert", json!({"text": "Edited: "})).unwrap();
     assert!(app.session.doc.plain_text(wordcraft_doc::StoryRef::Body).starts_with("Edited: "));

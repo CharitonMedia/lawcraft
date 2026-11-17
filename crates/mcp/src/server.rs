@@ -4,7 +4,6 @@ use std::io::{BufRead, Read, Write};
 
 use serde_json::{Value, json};
 
-use wordcraft_engine::file_access;
 
 use crate::backend::Backend;
 use crate::tools::{call_tool, tool_definitions};
@@ -14,7 +13,7 @@ struct AsAutomation(Box<dyn Backend>);
 
 impl Backend for AsAutomation {
     fn call(&mut self, method: &str, params: Value) -> Result<Value, String> {
-        file_access::invoke_automation(|| self.0.call(method, params))
+        wordcraft_engine::invoke_automation(|| self.0.call(method, params))
     }
     fn has_ui(&self) -> bool {
         self.0.has_ui()

@@ -149,6 +149,11 @@ pub(crate) fn before_engine_command(app: &mut WordApp, id: &str, params: &Value)
     if id != "file.checkForUpdates" || !can_run_off_thread(app) {
         return None;
     }
+    // Control / MCP already wrap `execute` in `invoke_automation`: keep the check on this thread
+    // so the reply carries `status` instead of `pending`.
+    if wordcraft_engine::automation_invoked() {
+        return None;
+    }
     let ctx = app.ctx.clone()?;
     let startup = params.get("startup").and_then(Value::as_bool) == Some(true);
     queue_check(app, params.clone(), !startup, &ctx);
