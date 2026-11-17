@@ -564,6 +564,7 @@ fn update_fields_runs_registered_hooks() {
     crate::hooks::reset_for_test();
     r.unwrap();
     assert!(CALLED.load(std::sync::atomic::Ordering::SeqCst));
+}
 
 /// A fresh scratch directory for the file-name tests below.
 #[cfg(not(target_arch = "wasm32"))]
