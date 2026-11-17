@@ -1,6 +1,7 @@
 //! Appendix page-number prefix helpers for [`super::page_number`].
 
-use super::{Align, CharProps, CmdError, InlineObject, Paragraph, Session, TabAlign, TabStop, Value, p};
+use super::{Align, CharProps, CmdError, InlineObject, Paragraph, Session, Value, p};
+use wordcraft_doc::props::{TabAlign, TabStop};
 
 /// Build the gallery page-number paragraph, optionally with a text `prefix` before PAGE.
 pub(super) fn page_number_paragraph(style: &str, align: Align, x_of_y: bool, prefix: &str) -> Result<Paragraph, CmdError> {
