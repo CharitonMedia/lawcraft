@@ -296,10 +296,7 @@ pub(crate) fn read_docx(bytes: &[u8], password: Option<&str>) -> Result<Document
     } else {
         bytes
     };
-    let mut doc = wordcraft_docx::read_with(
-        package,
-        &wordcraft_docx::ReadOptions { password: None, chunks: Some(&import_chunk) },
-    )?;
+    let mut doc = wordcraft_docx::read_with(package, &wordcraft_docx::ReadOptions { password: None, chunks: Some(&import_chunk) })?;
     // LawCraft: appendix page-number prefixes ride in w:docVars on the package.
     wordcraft_law_docx::apply_page_num_prefixes(&mut doc, package).map_err(|e| wordcraft_docx::DocxError::Zip(e.to_string()))?;
     Ok(doc)

@@ -207,6 +207,7 @@ fn import_report_preserves_embedded_docx_font_loading() {
     assert!(opened.pdf.is_none(), "a DOCX must not become a PDF conversion");
     assert!(!opened.encrypted);
     assert!((end_x(opened.doc) - mono).abs() < 0.01, "the report-based open path must load the embedded font");
+}
 
 /// `font.missing`'s fonts, as "font>shownAs".
 fn missing_list(s: &mut Session) -> Vec<String> {
