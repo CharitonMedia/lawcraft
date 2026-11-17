@@ -5,6 +5,10 @@ use wordcraft_doc::Document;
 #[cfg(not(target_arch = "wasm32"))]
 mod safe_save;
 
+#[path = "io_open.rs"]
+mod io_open;
+pub use io_open::{open_bytes_report, open_bytes_report_in, open_path_report, open_path_report_in};
+
 /// Formats WordCraft opens.
 pub const OPEN_EXTS: &[&str] = &[
     "pdf",
@@ -43,7 +47,7 @@ const OLE_SIG: &[u8] = &[0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1];
 
 /// The extension of a file name or path, lower-case; empty when the file name has none (a dot
 /// in a folder name doesn't count).
-fn ext_of(name: &str) -> String {
+pub(super) fn ext_of(name: &str) -> String {
     let file = name.rsplit(['/', '\\']).next().unwrap_or(name);
     file.rsplit_once('.').map(|(_, ext)| ext.to_ascii_lowercase()).unwrap_or_default()
 }
@@ -161,7 +165,7 @@ fn open_encrypted_odt(bytes: &[u8], password: Option<&str>, page: &wordcraft_doc
 /// Finish a document just read from a file: never leave it empty, and bring its unlocked
 /// `DATE`/`TIME` fields up to now the way Word does on open (see
 /// [`crate::cmd::references::refresh_date_fields`]).
-fn opened(doc: &mut Document) {
+pub(super) fn opened(doc: &mut Document) {
     doc.ensure_nonempty();
     crate::cmd::references::refresh_date_fields(doc);
 }
@@ -192,26 +196,6 @@ pub struct OpenedDocument {
     pub pdf: Option<wordcraft_pdf::import::ImportSummary>,
 }
 
-/// Open a file and report a PDF conversion separately from lossless document opening.
-pub fn open_bytes_report(name: &str, bytes: &[u8], password: Option<&str>) -> Result<OpenedDocument, String> {
-    open_bytes_report_in(name, bytes, password, &wordcraft_geom::Region::default())
-}
-
-/// [`open_bytes_report`] using the region's paper for formats without a page size.
-pub fn open_bytes_report_in(name: &str, bytes: &[u8], password: Option<&str>, region: &wordcraft_geom::Region) -> Result<OpenedDocument, String> {
-    if wordcraft_pdf::import::is_pdf(bytes) || ext_of(name) == "pdf" {
-        let (doc, summary) = wordcraft_pdf::import::read(bytes, password).map_err(|e| match e {
-            wordcraft_pdf::import::ImportError::NeedsPassword => wordcraft_docx::PASSWORD_REQUIRED.to_string(),
-            wordcraft_pdf::import::ImportError::WrongPassword => wordcraft_docx::WRONG_PASSWORD.to_string(),
-            other => other.to_string(),
-        })?;
-        return Ok(OpenedDocument { doc, encrypted: false, pdf: Some(summary) });
-    }
-    let (doc, encrypted) = open_other_bytes(name, bytes, password, &region_page(region))?;
-    load_embedded_fonts(&doc);
-    Ok(OpenedDocument { doc, encrypted, pdf: None })
-}
-
 /// [`open_bytes`] for a file that may be password-protected: a Word document encrypted with a
 /// password ([MS-OFFCRYPTO] agile or Standard encryption, under any Word extension, or the
 /// Word 97-2003 schemes) is decrypted with
@@ -238,7 +222,7 @@ pub fn open_bytes_in(name: &str, bytes: &[u8], password: Option<&str>, region: &
 /// Load the fonts `doc` embeds (#1171) for this run, in memory only: text set in a font that isn't
 /// installed then lays out and exports with it instead of a fallback. Faces already available
 /// stay as they are.
-fn load_embedded_fonts(doc: &Document) {
+pub(super) fn load_embedded_fonts(doc: &Document) {
     let files: Vec<(Vec<u8>, String)> = wordcraft_docx::embedded_fonts(doc)
         .into_iter()
         .filter_map(|f| wordcraft_fonts::decode_font_file(&f.data).ok().map(|data| (data, f.name)))
@@ -248,7 +232,7 @@ fn load_embedded_fonts(doc: &Document) {
     }
 }
 
-fn open_other_bytes(name: &str, bytes: &[u8], password: Option<&str>, page: &wordcraft_doc::SectionProps) -> Result<(Document, bool), String> {
+pub(super) fn open_other_bytes(name: &str, bytes: &[u8], password: Option<&str>, page: &wordcraft_doc::SectionProps) -> Result<(Document, bool), String> {
     let ext = ext_of(name);
     if matches!(ext.as_str(), "docx" | "docm" | "dotx" | "dotm" | "doc" | "dot") && wordcraft_docx::is_encrypted(bytes) {
         let mut doc = read_docx(bytes, password).map_err(|e| e.to_string())?;
@@ -288,18 +272,7 @@ fn open_other_bytes(name: &str, bytes: &[u8], password: Option<&str>, page: &wor
 /// Read a Word package (decrypted with `password` if it is encrypted), bringing in its
 /// alternative format chunks (`w:altChunk`) as Word does when it opens one: see [`import_chunk`].
 pub(crate) fn read_docx(bytes: &[u8], password: Option<&str>) -> Result<Document, wordcraft_docx::DocxError> {
-    // Decrypt once so the LawCraft prefix hook sees the same OOXML package bytes the reader used.
-    let decrypted;
-    let package: &[u8] = if wordcraft_docx::is_encrypted(bytes) {
-        decrypted = wordcraft_docx::decrypt(bytes, password)?;
-        decrypted.as_slice()
-    } else {
-        bytes
-    };
-    let mut doc = wordcraft_docx::read_with(package, &wordcraft_docx::ReadOptions { password: None, chunks: Some(&import_chunk) })?;
-    // LawCraft: appendix page-number prefixes ride in w:docVars on the package.
-    wordcraft_law_docx::apply_page_num_prefixes(&mut doc, package).map_err(|e| wordcraft_docx::DocxError::Zip(e.to_string()))?;
-    Ok(doc)
+    io_open::read_docx(bytes, password, Some(&import_chunk))
 }
 
 /// An alternative format chunk in a format the docx reader leaves to the format importers, as a
@@ -526,33 +499,6 @@ pub fn open_path_in(path: &std::path::Path, password: Option<&str>, region: &wor
     open_path_report_in(path, password, region).map(|opened| (opened.doc, opened.encrypted))
 }
 
-/// File-system variant of [`open_bytes_report`], with the same automation read confinement.
-#[cfg(not(target_arch = "wasm32"))]
-pub fn open_path_report(path: &std::path::Path, password: Option<&str>) -> Result<OpenedDocument, String> {
-    open_path_report_in(path, password, &wordcraft_geom::Region::default())
-}
-
-/// [`open_path_report`] using the region's paper for formats without a page size. The file is
-/// read as [`read_document`] reads it; a PDF must also be within the import limit.
-#[cfg(not(target_arch = "wasm32"))]
-pub fn open_path_report_in(path: &std::path::Path, password: Option<&str>, region: &wordcraft_geom::Region) -> Result<OpenedDocument, String> {
-    let bytes = read_document(path)?;
-    let name = path.to_string_lossy();
-    let pdf = wordcraft_pdf::import::is_pdf(&bytes);
-    if (pdf || ext_of(&name) == "pdf") && bytes.len() > wordcraft_pdf::import::MAX_BYTES {
-        return Err(format!("{}: file exceeds the {} MiB import limit", path.display(), wordcraft_pdf::import::MAX_BYTES / (1024 * 1024)));
-    }
-    if !pdf && matches!(ext_of(&name).as_str(), "html" | "htm" | "xhtml") {
-        // Pictures referenced by a relative path load from beside the HTML file.
-        let images = LocalImages::new(path.parent().unwrap_or(std::path::Path::new("")));
-        let html = wordcraft_formats::html::decode(&bytes);
-        let mut doc = wordcraft_formats::html::import_on(&html, &|src| images.load(src), &region_page(region));
-        fit_pictures(&mut doc);
-        opened(&mut doc);
-        return Ok(OpenedDocument { doc, encrypted: false, pdf: None });
-    }
-    open_bytes_report_in(&name, &bytes, password, region)
-}
 
 /// Largest document file opened by path.
 #[cfg(not(target_arch = "wasm32"))]
@@ -916,14 +862,3 @@ pub fn decode_text(b: &[u8]) -> String {
     wordcraft_formats::txt::decode(b)
 }
 
-/// Web callers supply bytes through [`open_bytes_report`].
-#[cfg(target_arch = "wasm32")]
-pub fn open_path_report(_path: &std::path::Path, _password: Option<&str>) -> Result<OpenedDocument, String> {
-    Err("file-system opening is unavailable in the browser; supply file bytes".into())
-}
-
-/// Region-aware path opening has the same browser limitation as [`open_path_report`].
-#[cfg(target_arch = "wasm32")]
-pub fn open_path_report_in(path: &std::path::Path, password: Option<&str>, _region: &wordcraft_geom::Region) -> Result<OpenedDocument, String> {
-    open_path_report(path, password)
-}

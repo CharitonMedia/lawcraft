@@ -111,7 +111,7 @@ pub fn specs() -> Vec<CommandSpec> {
             };
             let path = if path.to_ascii_lowercase().ends_with(".pdf") { path.to_string() } else { format!("{path}.pdf") };
             let opts = export_options(s, v);
-            let findings = s.run_export_checks(&opts, "pdf");
+            let findings = super::file_open::export_findings(s, &opts, "pdf");
             crate::io::save_path_with(std::path::Path::new(&path), &s.doc, None, &opts).map_err(CmdError::Failed)?;
             Ok(json!({"path": path, "markup": opts.markup, "findings": findings}))
         })
@@ -257,28 +257,8 @@ fn open(s: &mut Session, v: &Value) -> CmdResult {
         );
     }
     let password = p::str(v, "password");
-    // An empty file opens as a new blank document that saves back to it (#1384). PDF opens go
-    // through the report APIs so LawCraft can import a reflowed editable copy.
-    let opened = if let Some(data) = p::str(v, "data") {
-        let bytes = super::insert::base64_decode(data).ok_or_else(|| CmdError::Params("bad base64".into()))?;
-        if bytes.is_empty() {
-            crate::io::OpenedDocument { doc: normal_document(s), encrypted: false, pdf: None }
-        } else {
-            crate::io::open_bytes_report_in(path, &bytes, password, &s.region()).map_err(CmdError::Failed)?
-        }
-    } else if crate::io::is_empty_file(std::path::Path::new(path)) {
-        crate::io::OpenedDocument { doc: normal_document(s), encrypted: false, pdf: None }
-    } else {
-        crate::io::open_path_report_in(std::path::Path::new(path), password, &s.region()).map_err(CmdError::Failed)?
-    };
-    let crate::io::OpenedDocument { mut doc, encrypted, pdf } = opened;
-    // Plain text and Markdown carry no language: they are in the editing language.
-    let ext = std::path::Path::new(path).extension().and_then(std::ffi::OsStr::to_str).unwrap_or("").to_ascii_lowercase();
-    if let Some(lang) = s.prefs.default_language.as_ref().or(s.editing_lang.as_ref())
-        && matches!(ext.as_str(), "txt" | "text" | "md" | "markdown")
-    {
-        std::sync::Arc::make_mut(&mut doc.styles).default_chr.lang = Some(lang.clone());
-    }
+    let crate::io::OpenedDocument { mut doc, encrypted, pdf } = super::file_open::open_reported(s, path, v)?;
+    super::file_open::apply_plain_lang(s, path, &mut doc);
     match s.used_because() {
         None => s.set_document(doc),
         Some(why) => {
@@ -286,27 +266,7 @@ fn open(s: &mut Session, v: &Value) -> CmdResult {
             s.add_opened_document(doc);
         }
     }
-    if let Some(z) = s.doc.settings.zoom {
-        super::view::restore_zoom(s, z);
-    }
-    // A reflowed PDF is a new editable document, never an implicit overwrite of the source.
-    s.path = if pdf.is_some() { None } else { Some(path.into()) };
-    if pdf.is_some() {
-        // Save As suggests the PDF's own name, as a Word document.
-        s.file_name = std::path::Path::new(path).file_stem().map(|n| n.to_string_lossy().to_string()).filter(|n| !n.is_empty());
-        s.dirty = true;
-        s.status = "PDF imported as an editable copy.".into();
-    }
-    // Like Word, a document opened with a password is saved with it again.
-    if encrypted {
-        s.password = password.map(crate::io::Password::new);
-    }
-    let mut result = json!({"path": path, "paragraphs": s.doc.paragraph_count(), "words": s.doc.word_count(), "encrypted": encrypted, "alreadyOpen": false, "id": s.document_id()});
-    if let Some(summary) = pdf {
-        s.push_ui_request(json!({"open": "pdfImportReport", "warnings": summary.warnings}));
-        result["import"] = json!({"format": "pdf", "pages": summary.pages, "textCharacters": summary.text_characters, "images": summary.images, "warnings": summary.warnings, "saveAsRequired": true});
-    }
-    Ok(result)
+    super::file_open::finish_open(s, path, password, encrypted, pdf)
 }
 
 /// The document the file at `path` holds (or its bytes, base64 in `data`, with `path` only
@@ -435,10 +395,7 @@ fn save(s: &mut Session, v: &Value) -> CmdResult {
     let before_stamp =
         (s.doc.settings.zoom, s.doc.core.last_modified_by.clone(), s.doc.core.created.clone(), s.doc.core.modified.clone(), s.doc.core.revision);
     s.stamp_save();
-    // Every save and export runs the applied profile's checks before writing (PDF verification
-    // only when the output is a PDF). The export still proceeds; findings are reported, not
-    // blocking.
-    let findings = s.run_export_checks(&opts, &ext);
+    let findings = super::file_open::export_findings(s, &opts, &ext);
     let password = s.password.as_ref().map(crate::io::Password::as_str);
     // A header/footer just made and left empty isn't saved (#960).
     let copy = super::insert::saved_copy(s);
@@ -532,7 +489,7 @@ fn export_png(s: &mut Session, v: &Value) -> CmdResult {
     let strict = p::bool(v, "strict").unwrap_or(false);
     let scale = p::f32(v, "scale").unwrap_or(2.0).clamp(0.1, 8.0);
     let export_opts = export_options(s, v);
-    let findings = s.run_export_checks(&export_opts, "png");
+    let findings = super::file_open::export_findings(s, &export_opts, "png");
     let l = s.export_layout_with(export_opts.markup);
     let pg = l.pages.get(page).ok_or_else(|| CmdError::Params(format!("no page {}", page + 1)))?;
     // A page image is the printed page: headers and footers at full strength. Dimming them is
