@@ -4,7 +4,9 @@
 
 use wordcraft_doc::Document;
 
-use super::{LocalImages, ext_of, fit_pictures, load_embedded_fonts, opened, read_bytes, read_document, region_page};
+#[cfg(not(target_arch = "wasm32"))]
+use super::{LocalImages, fit_pictures, opened, read_document};
+use super::{ext_of, load_embedded_fonts, read_bytes, region_page};
 
 /// Result of opening a file, including conversion details for formats that must be saved as a copy.
 pub struct OpenedDocument {

@@ -7019,16 +7019,20 @@ dependencies = [
  "image",
  "log",
  "proptest",
+ "quick-xml 0.41.0",
  "regex",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
  "wordcraft-control-key",
  "wordcraft-doc",
+ "wordcraft-docx",
  "wordcraft-engine",
  "wordcraft-geom",
+ "wordcraft-law-docx",
  "wordcraft-pdf",
  "wordcraft-proof",
+ "zip 3.0.0",
 ]
 
 [[package]]
@@ -7038,7 +7042,6 @@ dependencies = [
  "quick-xml 0.41.0",
  "thiserror 2.0.21",
  "wordcraft-doc",
- "wordcraft-docx",
  "zip 3.0.0",
 ]
 

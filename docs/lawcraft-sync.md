@@ -124,7 +124,7 @@ re-exports). Implementation lives in LawCraft-owned `import.rs`, `extract.rs`,
   `install` / `core_wraps`.
 - Regression tests live in `crates/law*`, `crates/*/law_tests.rs`, `crates/engine/src/tests_hooks.rs`,
   `apps/wordcraft-cli/tests/law_*.rs`, `crates/ui-egui/tests/law_control_automation.rs`,
-  `crates/docx` no longer carries LawCraft tests (`page_num_prefix` moved to `law-docx`).
+  `crates/law/tests/page_num_prefix.rs` covers appendix prefix OOXML (law-docx hooks; no WordCraft file edit).
 
 ## Making the list shorter
 

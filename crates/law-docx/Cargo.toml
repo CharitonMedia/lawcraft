@@ -16,4 +16,3 @@ thiserror = { workspace = true }
 
 [dev-dependencies]
 wordcraft-doc = { workspace = true, features = ["test-support"] }
-wordcraft-docx = { workspace = true }

@@ -24,3 +24,7 @@ log = { workspace = true }
 [dev-dependencies]
 image = { workspace = true }
 proptest = { workspace = true }
+wordcraft-docx = { workspace = true }
+wordcraft-law-docx = { workspace = true }
+quick-xml = { workspace = true }
+zip = { workspace = true }
