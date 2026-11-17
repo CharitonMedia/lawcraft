@@ -53,14 +53,65 @@ impl ModuleEn {
     }
 }
 
+fn list_contains(words: &[&str], candidate: &str) -> bool {
+    words.binary_search(&candidate).is_ok() || words.iter().any(|w| (*w).eq_ignore_ascii_case(candidate))
+}
+
+/// Module spelling with the same English inflection and prefix rules craft-proof uses for its
+/// built-in word list (`known_with`): `-s`/`-es`/`-ies`, `-ed`/`-ied`, `-ing`, `-ly`/`-ily`,
+/// `-ically`, `-er`/`-est`/`-ness`, doubled consonants, and `un`/`re`/`non`/… prefixes.
 fn in_module_spelling(lower: &str, module: ModuleEn) -> bool {
     let Some(words) = module.spelling else {
         return false;
     };
-    if words.binary_search(&lower).is_ok() {
+    if list_contains(words, lower) {
         return true;
     }
-    words.iter().any(|w| (*w).eq_ignore_ascii_case(lower))
+    let stems: [(&str, &[&str]); 13] = [
+        ("'s", &[""]),
+        ("s", &[""]),
+        ("es", &["", "e"]),
+        ("ies", &["y"]),
+        ("ed", &["", "e"]),
+        ("ied", &["y"]),
+        ("ing", &["", "e"]),
+        ("ly", &["", "le"]),
+        ("ily", &["y"]),
+        ("ically", &["ic"]),
+        ("er", &["", "e"]),
+        ("est", &["", "e"]),
+        ("ness", &[""]),
+    ];
+    for (suf, adds) in stems {
+        if let Some(stem) = lower.strip_suffix(suf)
+            && stem.len() >= 2
+        {
+            for a in adds {
+                let s = format!("{stem}{a}");
+                if list_contains(words, &s) {
+                    return true;
+                }
+            }
+            let b = stem.as_bytes();
+            if (suf == "ing" || suf == "ed" || suf == "er" || suf == "est")
+                && b.len() >= 3
+                && b.last() == b.get(b.len().saturating_sub(2))
+                && let Some(s) = stem.get(..stem.len().saturating_sub(1))
+                && list_contains(words, s)
+            {
+                return true;
+            }
+        }
+    }
+    for pre in ["un", "re", "non", "pre", "over", "under", "co", "mis"] {
+        if let Some(rest) = lower.strip_prefix(pre)
+            && rest.len() >= 3
+            && list_contains(words, rest)
+        {
+            return true;
+        }
+    }
+    false
 }
 
 fn is_english(lang: ProofLang) -> bool {
