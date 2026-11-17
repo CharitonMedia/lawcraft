@@ -1,10 +1,14 @@
 use super::PartKind;
 use super::header_footer::hf_part;
 use super::{
-    Align, Block, CharProps, CmdError, CmdResult, InlineObject, Paragraph, Rgb, Selection, Session, StoryRef, TabAlign, TabStop, TextColor, Value,
+    Align, Block, CharProps, CmdError, CmdResult, InlineObject, Paragraph, Rgb, Selection, Session, StoryRef, TextColor, Value,
     delete_selection, json, p, para_block, sel_result, type_text, type_text_with_lang,
 };
 use std::collections::BTreeSet;
+
+#[path = "page_prefix.rs"]
+mod page_prefix;
+use page_prefix::{apply_section_prefix, page_number_paragraph, read_prefix};
 
 fn story_has_page_field(doc: &wordcraft_doc::Document, story: StoryRef, except: Option<usize>) -> bool {
     let Some(blocks) = doc.story(story) else { return false };
@@ -35,38 +39,6 @@ fn story_has_page_field(doc: &wordcraft_doc::Document, story: StoryRef, except: 
     false
 }
 
-fn page_number_paragraph(style: &str, align: Align, x_of_y: bool, prefix: &str) -> Result<Paragraph, CmdError> {
-    let field = InlineObject::Field { instr: "PAGE".into(), result: "1".into(), locked: false, dirty: false, code: false, form: String::new() };
-    let mut para = Paragraph::new().styled(style);
-    para.props.align = Some(align);
-    para.props.tabs = Some(vec![TabStop { pos: 0.0, align: TabAlign::Clear, leader: Default::default() }]);
-    if x_of_y {
-        let page_pos = if prefix.is_empty() {
-            para.insert_text(0, "Page  of ", &CharProps::default())?;
-            5
-        } else {
-            para.insert_text(0, prefix, &CharProps::default())?;
-            prefix.len()
-        };
-        para.insert_object(page_pos, field, &CharProps { bold: Some(true), ..Default::default() })?;
-        if !prefix.is_empty() {
-            para.insert_text(para.len(), " of ", &CharProps::default())?;
-        }
-        let end = para.len();
-        para.insert_object(
-            end,
-            InlineObject::Field { instr: "NUMPAGES".into(), result: "1".into(), locked: false, dirty: false, code: false, form: String::new() },
-            &CharProps { bold: Some(true), ..Default::default() },
-        )?;
-    } else if prefix.is_empty() {
-        para.insert_object(0, field, &CharProps::default())?;
-    } else {
-        para.insert_text(0, prefix, &CharProps::default())?;
-        para.insert_object(prefix.len(), field, &CharProps::default())?;
-    }
-    Ok(para)
-}
-
 // Only cached display text is transferable; instructions, flags and formatting remain part of ownership.
 fn copy_page_number_results(to: &mut Paragraph, from: &Paragraph) {
     for object in &mut to.objects {
@@ -88,11 +60,8 @@ pub(super) fn page_number(s: &mut Session, v: &Value) -> CmdResult {
         _ => Align::Center,
     };
     let x_of_y = p::str(v, "format").is_some_and(|f| f.contains("of"));
-    let prefix_param = p::str(v, "prefix");
+    let prefix_param = read_prefix(v)?;
     let prefix = prefix_param.unwrap_or("");
-    if prefix.chars().count() > 16 {
-        return Err(CmdError::Params("`prefix` is at most 16 characters".into()));
-    }
     let field = InlineObject::Field { instr: "PAGE".into(), result: "1".into(), locked: false, dirty: false, code: false, form: String::new() };
     if position == "current" {
         let props = s.typing_props();
@@ -142,11 +111,7 @@ pub(super) fn page_number(s: &mut Session, v: &Value) -> CmdResult {
                 *block = replacement;
             }
         }
-        if let Some(pfx) = prefix_param {
-            crate::cmd::page::with_sect(s, |sect| {
-                sect.page_num_prefix = if pfx.is_empty() { None } else { Some(pfx.to_string()) };
-            })?;
-        }
+        apply_section_prefix(s, prefix_param)?;
         return Ok(json!({"story": id}));
     }
     let blocks = s.doc.story_mut(story)?;
@@ -163,11 +128,7 @@ pub(super) fn page_number(s: &mut Session, v: &Value) -> CmdResult {
         }
     }
     blocks.push(para_block(para));
-    if let Some(pfx) = prefix_param {
-        crate::cmd::page::with_sect(s, |sect| {
-            sect.page_num_prefix = if pfx.is_empty() { None } else { Some(pfx.to_string()) };
-        })?;
-    }
+    apply_section_prefix(s, prefix_param)?;
     Ok(json!({"story": id}))
 }
 
