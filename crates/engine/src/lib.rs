@@ -225,3 +225,5 @@ pub mod p {
 mod tests;
 #[cfg(test)]
 mod tests_hooks;
+#[cfg(test)]
+mod law_tests;

@@ -903,19 +903,3 @@ fn inspect_removals_work_when_the_document_does_not_track_changes() {
     assert!(!text.contains("Hidden"), "the hidden text is still there: {text}");
     assert!(text.contains("Visible text."), "{text}");
 }
-
-#[test]
-fn cell_margins_for_the_table_or_one_cell() {
-    let mut s = Session::new(Document::new());
-    s.run("insert.table", &json!({"rows": 1, "cols": 2})).unwrap();
-    s.run("table.cellMargins", &json!({"top": 8, "left": 0, "bottom": 8, "right": 20, "cell": true})).unwrap();
-    let t = s.doc.body[0].as_table().unwrap();
-    assert_eq!(t.rows[0].cells[0].props.margins, Some([8.0, 0.0, 8.0, 20.0]));
-    assert_eq!(t.rows[0].cells[1].props.margins, None, "only the caret cell");
-    assert_eq!(t.props.cell_margins, None);
-    s.run("table.cellMargins", &json!({"top": 4})).unwrap();
-    assert_eq!(s.doc.body[0].as_table().unwrap().props.cell_margins, Some([4.0, 5.4, 0.0, 5.4]));
-    // Outside a table there is nothing to set.
-    let mut s = Session::new(Document::new());
-    assert!(s.run("table.cellMargins", &json!({"cell": true})).is_err());
-}

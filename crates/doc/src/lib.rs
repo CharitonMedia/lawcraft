@@ -150,3 +150,5 @@ pub struct Document {
 mod test_log;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod law_tests;
