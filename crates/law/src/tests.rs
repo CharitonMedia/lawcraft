@@ -923,3 +923,13 @@ fn page_number_prefix_with_x_of_y_keeps_the_prefix() {
     let text = reopened.plain_text(StoryRef::Part(footer));
     assert_eq!(text, "A-1 of 1", "round-trip: {text:?}");
 }
+
+#[test]
+fn text_stories_cover_the_body_and_every_part() {
+    use wordcraft_doc::Part;
+    let mut d = Document::new();
+    assert_eq!(d.text_stories(), vec![StoryRef::Body]);
+    d.parts.insert(2, Part::default());
+    d.parts.insert(1, Part::default());
+    assert_eq!(d.text_stories(), vec![StoryRef::Body, StoryRef::Part(1), StoryRef::Part(2)]);
+}

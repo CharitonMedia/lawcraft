@@ -499,7 +499,9 @@ fn bookmark_heading(s: &mut Session, path: &Path, lead: usize) -> Result<String,
 /// Regenerate the TOC entries with page numbers (two layout passes: entries change pagination).
 pub fn update_toc(s: &mut Session) -> Result<(), CmdError> {
     let tabs = cached_toc_tabs(s);
-    regenerate_toc(s, None, &tabs)
+    regenerate_toc(s, None, &tabs)?;
+    // Module hooks (LawCraft certificates, …) run after TOC refresh; Update Fields reaches here too.
+    crate::hooks::run_on_update_fields(s)
 }
 
 /// Rebuild the entries the TOC field's switches ask for. The tab leader is `leader`, or the one

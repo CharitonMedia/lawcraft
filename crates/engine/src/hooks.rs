@@ -29,7 +29,7 @@ pub fn register_on_update_fields(f: fn(&mut Session) -> Result<(), CmdError>) {
 }
 
 /// Run every registered update-fields hook on `session`; the first error stops the rest.
-pub(crate) fn run_on_update_fields(session: &mut Session) -> Result<(), CmdError> {
+pub fn run_on_update_fields(session: &mut Session) -> Result<(), CmdError> {
     let hooks = ON_UPDATE_FIELDS.lock().unwrap_or_else(|e| e.into_inner());
     for f in hooks.iter() {
         f(session)?;
@@ -47,7 +47,7 @@ pub fn register_on_text_autoformat(f: fn(&mut Session, &str) -> Result<bool, Cmd
 }
 
 /// Run the registered AutoFormat hooks on typed `text` until one changes the document; `true` when one did.
-pub(crate) fn run_on_text_autoformat(session: &mut Session, text: &str) -> Result<bool, CmdError> {
+pub fn run_on_text_autoformat(session: &mut Session, text: &str) -> Result<bool, CmdError> {
     let hooks = ON_TEXT_AUTOFORMAT.lock().unwrap_or_else(|e| e.into_inner());
     for f in hooks.iter() {
         if f(session, text)? {

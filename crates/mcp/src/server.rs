@@ -4,8 +4,25 @@ use std::io::{BufRead, Read, Write};
 
 use serde_json::{Value, json};
 
+use wordcraft_engine::file_access;
+
 use crate::backend::Backend;
 use crate::tools::{call_tool, tool_definitions};
+
+/// Marks every backend call as automation so Headless can stay WordCraft-identical.
+struct AsAutomation(Box<dyn Backend>);
+
+impl Backend for AsAutomation {
+    fn call(&mut self, method: &str, params: Value) -> Result<Value, String> {
+        file_access::invoke_automation(|| self.0.call(method, params))
+    }
+    fn has_ui(&self) -> bool {
+        self.0.has_ui()
+    }
+    fn describe(&self) -> String {
+        self.0.describe()
+    }
+}
 
 /// The MCP revision we implement.
 pub const PROTOCOL_VERSION: &str = "2025-06-18";
@@ -90,7 +107,7 @@ fn error(id: Value, code: i64, message: impl Into<String>) -> Value {
 
 impl Server {
     pub fn new(backend: Box<dyn Backend>) -> Self {
-        Self { backend, initialized: false }
+        Self { backend: Box::new(AsAutomation(backend)), initialized: false }
     }
 
     pub fn backend(&mut self) -> &mut dyn Backend {

@@ -70,7 +70,10 @@ impl Session {
             comment_balloons: false,
             field_codes: shown.1,
             outline: outline.clone(),
-            proof: wordcraft_layout::ProofOptions { grammar: self.prefs.mark_grammar, spelling: self.prefs.spelling(), module: self.module_en },
+            proof: {
+                wordcraft_layout::set_proof_module(self.module_en);
+                wordcraft_layout::ProofOptions { grammar: self.prefs.mark_grammar, spelling: self.prefs.spelling(), module: self.module_en }
+            },
             typing_word: typing,
             filename: filename.clone(),
             filepath: filepath.clone(),

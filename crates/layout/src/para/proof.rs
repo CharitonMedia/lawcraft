@@ -34,15 +34,21 @@ pub(super) fn lang_at(runs: &[ProofRun], off: usize) -> wordcraft_proof::ProofLa
 /// and none touching a run left unchecked.
 ///
 /// `list_item` (see [`is_list_item`]) turns off the capital-first-word grammar rule.
-/// `opts.module` carries optional LawCraft legal-word / court-check supplements.
-pub fn paragraph_issues(p: &Paragraph, runs: &[ProofRun], opts: &crate::ProofOptions, list_item: bool) -> Vec<wordcraft_proof::Issue> {
+/// Module supplements come from [`crate::proof_module`] (the session keeps it in sync).
+pub fn paragraph_issues(
+    p: &Paragraph,
+    runs: &[ProofRun],
+    spelling: &wordcraft_proof::Options,
+    grammar: bool,
+    list_item: bool,
+) -> Vec<wordcraft_proof::Issue> {
     if p.text.trim().is_empty() || p.text.len() > 100_000 {
         return Vec::new();
     }
     let text = proof_text(p);
     let spans: Vec<(std::ops::Range<usize>, wordcraft_proof::ProofLang)> = runs.iter().map(|r| (r.range.clone(), r.lang)).collect();
     let skipped = skipped_ranges(runs);
-    let issues = wordcraft_proof::check_paragraph(&text, &spans, &opts.spelling, opts.grammar, list_item, opts.module);
+    let issues = wordcraft_proof::check_paragraph(&text, &spans, spelling, grammar, list_item, crate::proof_module());
     if skipped.is_empty() {
         return issues;
     }
@@ -87,7 +93,8 @@ pub(super) fn proof_issues(
     typing: Option<(usize, usize)>,
     list_item: bool,
 ) -> Vec<(usize, usize, bool)> {
-    paragraph_issues(p, runs, opts, list_item)
+    crate::set_proof_module(opts.module);
+    paragraph_issues(p, runs, &opts.spelling, opts.grammar, list_item)
         .into_iter()
         .map(|i| (i.start, i.end, i.kind == wordcraft_proof::IssueKind::Grammar))
         .filter(|&(a, b, grammar)| grammar || !typing.is_some_and(|(s, e)| a < e && s < b))

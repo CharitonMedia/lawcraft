@@ -258,6 +258,22 @@ impl Default for ProofOptions {
     }
 }
 
+thread_local! {
+    /// Module supplements for [`para::paragraph_issues`] when Review commands call it without a
+    /// full [`ProofOptions`] (kept in sync with the session's `module_en` by the engine / law install).
+    static PROOF_MODULE: std::cell::Cell<wordcraft_proof::ModuleEn> = std::cell::Cell::new(wordcraft_proof::ModuleEn::default());
+}
+
+/// Set the module supplements [`para::paragraph_issues`] uses (session / law install).
+pub fn set_proof_module(module: wordcraft_proof::ModuleEn) {
+    PROOF_MODULE.with(|c| c.set(module));
+}
+
+/// The module supplements [`para::paragraph_issues`] will use.
+pub fn proof_module() -> wordcraft_proof::ModuleEn {
+    PROOF_MODULE.with(|c| c.get())
+}
+
 impl LayoutOptions {
     /// Which tracked deletions in `story` take no space and draw nothing.
     pub fn hides_deleted(&self, story: StoryRef) -> HideDeleted {

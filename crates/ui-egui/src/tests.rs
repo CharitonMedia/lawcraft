@@ -6382,17 +6382,7 @@ fn the_full_screen_button_reports_the_commands_own_enabled_state() {
         .iter()
         .map(|s| {
             if s.id == "view.fullScreen" {
-                CommandSpec {
-                    id: s.id,
-                    label: s.label,
-                    location: s.location,
-                    shortcut: s.shortcut,
-                    params: s.params,
-                    mutates: s.mutates,
-                    replaces_document: s.replaces_document,
-                    enabled: unavailable,
-                    run: s.run,
-                }
+                CommandSpec { enabled: unavailable, ..s.clone() }
             } else {
                 s.clone()
             }

@@ -80,6 +80,12 @@ impl WordApp {
         }
         let applied = applied_font(id, &params);
         let r = self.execute_user(id, params);
+        // Ribbon Help ▸ Check for Updates: when the check ran on this thread (no worker), say
+        // "up to date" or why GitHub could not be reached (#15 review). Off-thread checks return
+        // `pending` and report when the worker finishes.
+        if id == "file.checkForUpdates" && r.as_ref().ok().and_then(|v| v.get("pending")).is_none() {
+            update::report_update_check(self, r.clone());
+        }
         // A save error already on the status line is the reason to see; the refusal shows otherwise.
         if let (Some(e), true) = (refused, r.is_ok()) {
             self.status(e);

@@ -167,7 +167,7 @@ pub(crate) fn handle_ui_request(app: &mut WordApp, req: &Value) {
         app.update.reboot_notice = true;
     }
     if req.get("updateMacDmg").and_then(Value::as_bool) == Some(true) {
-        app.update_feedback(tl!("Drag WordCraft into Applications, then reopen it."));
+        feedback(app, tl!("Drag WordCraft into Applications, then reopen it."));
     }
 }
 
@@ -214,15 +214,26 @@ pub(crate) fn report_update_check(app: &mut WordApp, result: Result<Value, Strin
                     log::warn!("update check failed: {detail}");
                 }
                 let text = if key.is_empty() { tl!(wordcraft_engine::update::MSG_CHECK_FAILED) } else { tl!(key) };
-                app.update_feedback(text);
+                feedback(app, text);
             }
             // `current`, or a throttled automatic check that the user forced past: say so.
-            _ => app.update_feedback(tl!("WordCraft is up to date.")),
+            _ => feedback(app, tl!("WordCraft is up to date.")),
         },
         Err(e) => {
             log::warn!("update check failed: {e}");
-            app.update_feedback(tl!(wordcraft_engine::update::MSG_CHECK_FAILED));
+            feedback(app, tl!(wordcraft_engine::update::MSG_CHECK_FAILED));
         }
+    }
+}
+
+/// A one-line update answer: the status bar in the editor, plus a durable bar over Backstage,
+/// whose status bar is hidden. A manual check runs from File ▸ Check for updates, and the macOS
+/// handoff instruction and install errors must stay visible there (#15 review).
+pub(crate) fn feedback(app: &mut WordApp, s: impl Into<String>) {
+    let text = s.into();
+    app.status(text.clone());
+    if app.ui.backstage {
+        app.update.message = Some(text);
     }
 }
 
@@ -415,7 +426,7 @@ fn apply_install_result(app: &mut WordApp, v: Result<Value, String>) -> bool {
                 if let Some(detail) = v.get("errorDetail").and_then(Value::as_str) {
                     log::warn!("update failed: {detail}");
                 }
-                app.update_feedback(text);
+                feedback(app, text);
                 false
             } else {
                 // Only MSI / .deb one-click handoffs quit; macOS opens the `.dmg` in Finder.
@@ -427,7 +438,7 @@ fn apply_install_result(app: &mut WordApp, v: Result<Value, String>) -> bool {
         }
         Err(e) => {
             log::warn!("update failed: {e}");
-            app.update_feedback(tl!(wordcraft_engine::update::MSG_START_FAILED));
+            feedback(app, tl!(wordcraft_engine::update::MSG_START_FAILED));
             false
         }
     }

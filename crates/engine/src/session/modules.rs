@@ -12,6 +12,12 @@ impl Session {
         self.prefs.module_enabled(id)
     }
 
+    /// Set English module supplements for proofing (layout Review commands and on-screen squiggles).
+    pub fn set_module_en(&mut self, module: wordcraft_proof::ModuleEn) {
+        self.module_en = module;
+        wordcraft_layout::set_proof_module(module);
+    }
+
     /// Install commands an optional module supplies (`law.profiles.apply` from LawCraft, say).
     /// The host calls this once at start-up, when the module is turned on, and every way in
     /// reaches them from then on: the ribbon, the command palette, shortcuts, the CLI, the JSON
@@ -34,6 +40,23 @@ impl Session {
         }
         self.registry = Arc::new(crate::Registry::new(all));
         added
+    }
+
+    /// Replace a registered command in place (an optional module may wrap a core command). The
+    /// replacement must keep the same id. Returns whether a command was replaced.
+    pub fn replace_command(&mut self, id: &str, map: impl FnOnce(CommandSpec) -> CommandSpec) -> bool {
+        let mut all = self.registry.all().to_vec();
+        let Some(i) = all.iter().position(|c| c.id == id) else {
+            return false;
+        };
+        let replacement = map(all[i].clone());
+        if replacement.id != id {
+            log::warn!("replace_command: id must stay `{id}`, got `{}`", replacement.id);
+            return false;
+        }
+        all[i] = replacement;
+        self.registry = Arc::new(crate::Registry::new(all));
+        true
     }
 
     /// Document-level lint findings for Review › Proofing (`review.issues`): every source's, in
