@@ -14,10 +14,19 @@ has to pass before anything is pushed. **By hand** means the sync stops, opens t
 WordCraft sync needs attention" issue and assigns it; the fix is to take WordCraft's version and
 add LawCraft's lines back where WordCraft now keeps that code.
 
-Last checked against WordCraft `v0.18.1` (`079f478b`), 2026-11-17 (Pass 2).
-**39** modified WordCraft code files under `crates/` and `apps/` (target: under 40).
+Last checked against WordCraft `v0.18.1` (`079f478b`), 2026-11-17 (Pass 3).
+**42** modified WordCraft code files under `crates/` and `apps/` (Pass 2 was 39; target under 40).
+Three unavoidable Pass 3 additions are listed below; each is under 30 added lines.
 No such file has more than 30 added lines vs `v0.18.1`. Branding, packaging, docs, and
 workspace files outside that count may still differ; they are listed below.
+
+### Pass 3 unavoidable WordCraft-file edits (+3)
+
+| File | Why it had to change | Lines |
+|---|---|---|
+| `crates/engine/src/session/layout.rs` | Scope `module_en` with `enter_session_module` around squiggle/layout proofing so a second `Session::new` on the same thread cannot clear LawCraft session A's module (thread-local bleed). Also copy `module_en` into `preview_layout`. | +3 |
+| `crates/ui-egui/src/dialogs.rs` | Silence wasm unused re-exports of `block_behind` / `forget_nudge` (only used by desktop `file_browser`). Same 2 warnings on bare WordCraft `v0.18.1`. | +3 |
+| `crates/ui-egui/src/theme.rs` | Silence wasm unused `system_arabic` (native-only system Arabic font path), matching the existing `system_cjk` / `prefer_hant` pattern. Same warning on bare `v0.18.1`. | +2 |
 
 LawCraft-owned **new** modules (not WordCraft files; they do not appear in
 `--diff-filter=M`) hold the bulk: `crates/engine/src/{hooks,lint,update,law_tests,tests_hooks,
@@ -74,6 +83,7 @@ mods, `replaces_document` side-channel), `crates/engine/src/prefs.rs` (`modules`
 `crates/engine/src/session.rs`, `crates/engine/src/session/documents.rs`,
 `crates/engine/src/session/snapshot.rs`, `crates/engine/src/session/lifecycle.rs`
 (`core_wraps` + `install_commands`; bulk in `session/modules.rs`),
+`crates/engine/src/session/layout.rs` (scoped proof-module guard; Pass 3),
 `crates/engine/src/ribbon.rs` (add-in tab fields; bulk in `ribbon_addins.rs`),
 `crates/engine/src/cmd.rs` (`tracked_edit` / `file_open` / `update` / `core_wraps` mods),
 `crates/engine/src/cmd/options.rs` (modules prefs commands),
@@ -100,6 +110,7 @@ re-exports). Implementation lives in LawCraft-owned `import.rs`, `extract.rs`,
 `crates/ui-egui/src/app/prefs.rs`, `crates/ui-egui/src/backstage.rs`,
 `crates/ui-egui/src/control/handler.rs` (`invoke_automation`),
 `crates/ui-egui/src/file_dialogs.rs`, `crates/ui-egui/src/i18n.rs` (rebrand helpers),
+`crates/ui-egui/src/dialogs.rs` / `theme.rs` (wasm unused-warning fixes; Pass 3),
 `crates/ui-egui/src/options.rs` (File › Options › Add-ins),
 `crates/ui-egui/src/window_ui.rs`.
 
@@ -117,8 +128,8 @@ re-exports). Implementation lives in LawCraft-owned `import.rs`, `extract.rs`,
 ## In LawCraft's own crates, tied to WordCraft
 
 - `crates/law-ui/Cargo.toml` pins `craft-ui` at the same craft-libs rev as `crates/ui-egui/Cargo.toml`.
-- `crates/proof` re-exports craft-proof (same rev as WordCraft) and adds `ModuleEn` (TLS for
-  layout proofing without patching WordCraft layout sources).
+- `crates/proof` re-exports craft-proof (same rev as WordCraft) and adds `ModuleEn` plus a
+  scoped `enter_session_module` guard (layout / Review proofing only; never a lasting TLS default).
 - `crates/law-docx` owns appendix prefix package I/O; engine depends on it for two hooks only.
 - `crates/law` registers commands, export checks, TOA/passim helpers, and AutoFormat wraps via
   `install` / `core_wraps`.
