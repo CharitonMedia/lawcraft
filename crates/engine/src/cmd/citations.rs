@@ -24,8 +24,6 @@ pub use generated::ENTRY_STYLE;
 pub(crate) use generated::generated_list;
 use generated::table_of_figures;
 pub use generated::{figures_instr, ta_field, update_generated};
-#[cfg(test)]
-use generated::{has_switch, switch_value};
 pub use render::{cite, entry};
 pub use sources::update_citations;
 use sources::{citation, sources};

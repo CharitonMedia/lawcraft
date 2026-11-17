@@ -37,22 +37,10 @@ if git merge-base --is-ancestor "$tag" HEAD; then
   exit 0
 fi
 
-# Every conflict path must appear in docs/lawcraft-sync.md (backticks or assets/app-icon/*).
-path_on_sync_list() {
-  local f="$1" doc="docs/lawcraft-sync.md"
-  case "$f" in
-    assets/app-icon/*) grep -q 'assets/app-icon/\*' "$doc" && return 0 ;;
-  esac
-  grep -Fq "\`$f\`" "$doc"
-}
-
+# Every conflict path must appear in docs/lawcraft-sync.md (backticks or globs).
 msg="Merge WordCraft $tag ($(git rev-parse --short "$tag"))"
 if ! git merge --no-edit -m "$msg" "$tag"; then
-  unlisted=""
-  while IFS= read -r f; do
-    [ -z "$f" ] && continue
-    path_on_sync_list "$f" || unlisted="$unlisted$f "
-  done < <(git diff --name-only --diff-filter=U)
+  unlisted="$(git diff --name-only --diff-filter=U | .github/sync/check_sync_list.py || true)"
   if [ -n "$unlisted" ]; then
     echo "conflicts=$unlisted" >>"$out"
     git merge --abort

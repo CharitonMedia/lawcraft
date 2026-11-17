@@ -549,23 +549,6 @@ fn caption_for_an_object_in_a_cell_stays_in_the_cell() {
     assert_eq!(texts.get(1).map(String::as_str), Some("Figure 1"), "{texts:?}");
 }
 
-#[test]
-fn update_fields_runs_registered_hooks() {
-    static CALLED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-    fn mark(_: &mut Session) -> Result<(), CmdError> {
-        CALLED.store(true, std::sync::atomic::Ordering::SeqCst);
-        Ok(())
-    }
-    let _lock = crate::hooks::HOOK_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    crate::hooks::reset_for_test();
-    crate::hooks::register_on_update_fields(mark);
-    let mut s = Session::new(wordcraft_doc::Document::new());
-    let r = s.run("references.updateFields", &json!({}));
-    crate::hooks::reset_for_test();
-    r.unwrap();
-    assert!(CALLED.load(std::sync::atomic::Ordering::SeqCst));
-}
-
 /// A fresh scratch directory for the file-name tests below.
 #[cfg(not(target_arch = "wasm32"))]
 fn filename_scratch_dir(tag: &str) -> std::path::PathBuf {

@@ -841,4 +841,7 @@ pub(crate) fn rust_sources(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
 mod tests_dialog_tabs;
 
 #[cfg(test)]
+mod law_tests;
+
+#[cfg(test)]
 mod tests;

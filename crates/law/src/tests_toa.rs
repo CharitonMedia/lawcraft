@@ -176,3 +176,41 @@ fn rebuilding_adds_a_category_the_table_did_not_have() {
     // Building once more adds nothing new.
     assert_eq!(run(&mut s, "law.toa.build", json!({"pack": "missouri"}))["inserted"], json!([]));
 }
+
+/// Engine TOA categories (`\c`) and passim (`\p`): WordCraft commands the legal add-in relies on.
+#[test]
+fn table_of_authorities_categories_and_passim() {
+    let mut s = Session::new(wordcraft_doc::Document::from_text("Smith v. Jones\nSection 1.010\nTail"));
+    s.run("select.text", &json!({"text": "Smith v. Jones"})).unwrap();
+    s.run("references.markCitation", &json!({"category": 1})).unwrap();
+    s.run("select.text", &json!({"text": "Section 1.010"})).unwrap();
+    s.run("references.markCitation", &json!({"category": 2})).unwrap();
+    assert!(s.run("references.markCitation", &json!({"entry": "x", "category": 17})).is_err());
+    assert!(fields(&s).iter().any(|f| f == "TA \\l \"Smith v. Jones\" \\c 1"), "{:?}", fields(&s));
+    for k in 0..5 {
+        s.run("caret.docEnd", &json!({})).unwrap();
+        s.run("text.pageBreak", &json!({})).unwrap();
+        s.run("text.newParagraph", &json!({})).unwrap();
+        s.run("text.insert", &json!({"text": format!("Again {k}")})).unwrap();
+    }
+    for k in 0..5 {
+        s.run("select.text", &json!({"text": format!("Again {k}")})).unwrap();
+        s.run("references.markCitation", &json!({"entry": "Smith v. Jones", "category": 1})).unwrap();
+    }
+    s.run("caret.docEnd", &json!({})).unwrap();
+    s.run("text.newParagraph", &json!({})).unwrap();
+    s.run("references.tableOfAuthorities", &json!({"category": 1, "passim": true, "title": "Cases"})).unwrap();
+    s.run("caret.docEnd", &json!({})).unwrap();
+    s.run("text.newParagraph", &json!({})).unwrap();
+    s.run("references.tableOfAuthorities", &json!({"category": 2, "title": "Statutes"})).unwrap();
+    assert!(fields(&s).iter().any(|f| f == "TOA \\c \"1\" \\p"), "{:?}", fields(&s));
+    let t = s.doc.plain_text(StoryRef::Body);
+    assert!(t.contains("Smith v. Jones\tpassim"), "{t}");
+    assert!(t.contains("Section 1.010\t1"), "{t}");
+    let cases = t.find("Cases").unwrap();
+    let statutes = t.find("Statutes").unwrap();
+    let sec = t.rfind("Section 1.010\t").unwrap();
+    assert!(sec > statutes && statutes > cases, "statutes listed under Statutes only: {t}");
+    assert!(!t[cases..statutes].contains("Section 1.010"), "{t}");
+    assert!(s.run("references.tableOfAuthorities", &json!({"category": 0})).is_err());
+}

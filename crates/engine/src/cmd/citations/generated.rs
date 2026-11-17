@@ -494,6 +494,14 @@ fn entries_for(s: &mut Session, kind: &str) -> Vec<(String, bool)> {
 mod tests {
     use super::*;
 
+    #[test]
+    fn field_switch_values() {
+        assert_eq!(switch_value(r#"TOA \h \c "4" \p"#, 'c').as_deref(), Some("4"));
+        assert_eq!(switch_value(r#"TA \l "Doe, 1 U.S. 1 \c" \c 2"#, 'c').as_deref(), Some("2"));
+        assert_eq!(switch_value("TOA", 'c'), None);
+        assert!(has_switch(r#"TOA \c "1" \p"#, 'p') && !has_switch(r#"TOA \c "1""#, 'p'));
+    }
+
     /// A field before a list's in its paragraph (an empty `PAGE`) closes first: the list still
     /// ends at its own field end, paragraphs below, not in its first paragraph.
     #[test]
