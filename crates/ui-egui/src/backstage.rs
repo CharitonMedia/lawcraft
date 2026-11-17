@@ -307,33 +307,6 @@ fn works_without_document(page: &str) -> bool {
     matches!(page, "home" | "new" | "open" | "options")
 }
 
-/// Report a manual **Check for updates** in the status bar when the notice bar won't: a newer
-/// release already shows its own notice, but "up to date" and network errors produced no visible
-/// answer before (#15 review). Shared with the ribbon's Help ▸ Check for Updates.
-pub(crate) fn report_update_check(app: &mut WordApp, result: Result<serde_json::Value, String>) {
-    match result {
-        Ok(v) => match v.get("status").and_then(serde_json::Value::as_str) {
-            // `available` draws the update notice through the command's UI request; drop any answer
-            // bar left by a previous check so the two never sit together.
-            Some("available") => app.update.message = None,
-            Some("error") => {
-                let key = v.get("error").and_then(serde_json::Value::as_str).unwrap_or("");
-                if let Some(detail) = v.get("errorDetail").and_then(serde_json::Value::as_str) {
-                    log::warn!("update check failed: {detail}");
-                }
-                let text = if key.is_empty() { tl!(wordcraft_engine::update::MSG_CHECK_FAILED) } else { tl!(key) };
-                app.update_feedback(text);
-            }
-            // `current`, or a throttled automatic check that the user forced past: say so.
-            _ => app.update_feedback(tl!("WordCraft is up to date.")),
-        },
-        Err(e) => {
-            log::warn!("update check failed: {e}");
-            app.update_feedback(tl!(wordcraft_engine::update::MSG_CHECK_FAILED));
-        }
-    }
-}
-
 fn heading(ui: &mut Ui, s: &str) {
     ui.label(egui::RichText::new(tl!(s)).font(semibold(26.0)));
     ui.add_space(16.0);

@@ -159,17 +159,17 @@ fn control_update_check_defers_until_worker_finishes() {
 #[test]
 fn manual_update_check_reports_current_error_and_failure() {
     let mut a = app();
-    backstage::report_update_check(&mut a, Ok(json!({"status": "current", "current": "0.6.1"})));
+    update::report_update_check(&mut a, Ok(json!({"status": "current", "current": "0.6.1"})));
     assert!(a.status_msg.as_ref().is_some_and(|(m, _)| m.contains("up to date")), "{:?}", a.status_msg);
-    backstage::report_update_check(
+    update::report_update_check(
         &mut a,
         Ok(json!({"status": "error", "error": wordcraft_engine::update::MSG_CHECK_FAILED, "errorDetail": "dns"})),
     );
     assert!(a.status_msg.as_ref().is_some_and(|(m, _)| m.contains("reach GitHub")), "{:?}", a.status_msg);
-    backstage::report_update_check(&mut a, Err("nope".to_string()));
+    update::report_update_check(&mut a, Err("nope".to_string()));
     assert!(a.status_msg.as_ref().is_some_and(|(m, _)| m.contains("reach GitHub")), "{:?}", a.status_msg);
     a.status_msg = None;
-    backstage::report_update_check(&mut a, Ok(json!({"status": "available"})));
+    update::report_update_check(&mut a, Ok(json!({"status": "available"})));
     assert!(a.status_msg.is_none(), "the notice bar speaks for itself: {:?}", a.status_msg);
     assert!(a.update.message.is_none(), "an available update draws its own notice, not the bar message");
 }
@@ -180,7 +180,7 @@ fn manual_update_check_reports_current_error_and_failure() {
 fn manual_update_check_answer_is_rendered_in_backstage() {
     let mut a = app();
     a.run("ui.backstage", json!({"value": true, "page": "home"})).unwrap();
-    backstage::report_update_check(&mut a, Ok(json!({"status": "current", "current": "0.6.1"})));
+    update::report_update_check(&mut a, Ok(json!({"status": "current", "current": "0.6.1"})));
     assert!(a.update.message.as_deref().is_some_and(|m| m.contains("up to date")), "{:?}", a.update.message);
     let mut h = egui_kittest::Harness::builder().with_size(egui::vec2(1440.0, 900.0)).build_ui_state(
         |ui, app: &mut WordApp| {

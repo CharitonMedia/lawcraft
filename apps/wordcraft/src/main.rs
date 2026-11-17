@@ -634,21 +634,9 @@ fn main() -> eframe::Result {
             session.system_region = region;
             let mut app = WordApp::new(session, services(file_dialog, &cc.egui_ctx));
             app.set_startup_update_check(true);
-            // LawCraft, an add-in off until the user turns it on (File › Options › Add-ins): its
-            // profiles live in the settings folder (memory only in runs without preferences) and
-            // its commands come with it. It goes in before the preferences are applied, so the
-            // shortcuts and toolbar entries saved for its commands are kept.
-            wordcraft_law::set_profiles_dir(if prefs_enabled() { wordcraft_law::settings_dir() } else { None });
-            app.add_addin(Box::new(wordcraft_law_ui::LawAddIn::default()));
-            // LawCraft updates itself from its own releases; WordCraft's updater stays off.
-            wordcraft_ui_egui::update::take_over_wordcraft_updates(&mut app);
+            update_check::install_addin(&mut app, prefs_enabled());
             load_prefs(&mut app);
-            // LawCraft's tools are on until the user turns them off in File › Options › Add-ins.
-            if !app.session.prefs.modules.contains_key(wordcraft_law::MODULE) {
-                let mut modules = serde_json::Map::new();
-                modules.insert(wordcraft_law::MODULE.into(), true.into());
-                let _ = app.execute("file.options", serde_json::json!({ "modules": modules }));
-            }
+            update_check::ensure_module_on(&mut app);
             // After the preferences, so the reason it gives is in the interface language.
             if updates_unsafe {
                 app.disable_self_update();
@@ -656,12 +644,7 @@ fn main() -> eframe::Result {
             load_user_dictionary(&mut app);
             // Language packs from the suite's font store; an Install click is the person's own.
             wordcraft_engine::packs::use_font_store(true);
-            app.session.update_http = Some(update_check::http_get());
-            app.session.update_install = Some(update_install::handoff());
-            if let Ok(exe) = std::env::current_exe() {
-                app.session.update_exe = Some(exe.to_string_lossy().into_owned());
-            }
-            wordcraft_ui_egui::update::maybe_startup_prompt(&mut app);
+            update_check::wire(&mut app);
             // A region chosen in File › Options replaces the system's for the first blank
             // document too (#838).
             if !sample && app.session.prefs.region.is_some() {

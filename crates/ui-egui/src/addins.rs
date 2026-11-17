@@ -205,6 +205,73 @@ impl WordApp {
     }
 }
 
+/// True when the command replaces the open document (add-in / LawCraft commands).
+pub(crate) fn replaces_document(app: &WordApp, id: &str) -> bool {
+    app.session.registry.get(id).is_some_and(|c| c.replaces_document)
+}
+
+/// Before a user `run`: an add-in input dialog. Returns `Some` when the command was handled.
+pub(crate) fn before_user_run(app: &mut WordApp, id: &str, params: &Value) -> Option<Result<Value, String>> {
+    let what = app.addin_input_dialog(id, params)?;
+    Some(Ok(json!({"pending": what})))
+}
+
+/// `file.options` with modules: guard pending pages, run the inner command, then sync add-ins.
+pub(crate) fn intercept_execute(
+    app: &mut WordApp,
+    id: &str,
+    params: Value,
+    mut inner: impl FnMut(&mut WordApp, &str, Value) -> Result<Value, String>,
+) -> Result<Value, String> {
+    if id == "file.options" && params.get("modules").is_some() {
+        app.guard_addin_off(id, &params)?;
+        let r = inner(app, id, params);
+        if r.is_ok() {
+            app.sync_addins();
+        }
+        return r;
+    }
+    inner(app, id, params)
+}
+
+/// An add-in's own window request (`{"addin": id, "open": what}`). Returns true when handled.
+pub(crate) fn handle_ui_request(app: &mut WordApp, req: &Value) -> bool {
+    let Some(id) = req.get("addin").and_then(Value::as_str) else { return false };
+    let what = req.get("open").and_then(Value::as_str).unwrap_or("");
+    app.with_addin(id, |a, _| a.open(what));
+    true
+}
+
+/// Change the options pane, letting an add-in's page save first when leaving it.
+pub(crate) fn maybe_set_options_pane(app: &mut WordApp, pane: &str) {
+    if pane == app.ui.options_pane || app.leave_addin_page() {
+        app.ui.options_pane = pane.into();
+    }
+}
+
+/// Leave File for another ribbon tab, letting an add-in's options page save first.
+pub(crate) fn leave_file_for_tab(app: &mut WordApp, tab: String) {
+    if !app.ui.backstage || app.leave_addin_page() {
+        app.ui.tab = tab;
+        app.ui.backstage = false;
+    }
+}
+
+/// Apply a `ui.backstage` change, letting an add-in's options page save first when leaving it.
+pub(crate) fn set_backstage(app: &mut WordApp, want: bool, page: Option<String>, pane: Option<String>) {
+    let leaving =
+        !want || page.as_deref().is_some_and(|p| p != app.ui.backstage_page) || pane.as_deref().is_some_and(|p| p != app.ui.options_pane);
+    if !leaving || app.leave_addin_page() {
+        app.ui.backstage = want;
+        if let Some(pg) = page {
+            app.ui.backstage_page = pg;
+        }
+        if let Some(pane) = pane {
+            app.ui.options_pane = pane;
+        }
+    }
+}
+
 /// File › Options › Add-ins: each add-in the app has, with its switch.
 pub fn page(app: &mut WordApp, ui: &mut Ui) {
     ui.add_space(6.0);

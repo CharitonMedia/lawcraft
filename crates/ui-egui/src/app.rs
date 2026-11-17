@@ -14,6 +14,7 @@ use crate::update;
 mod commands;
 mod control;
 mod files;
+mod pdf_import_ui;
 #[cfg(test)]
 pub(crate) use files::suggested_stem;
 mod fonts;

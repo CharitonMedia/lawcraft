@@ -144,6 +144,88 @@ pub(crate) fn wordcraft_command(app: &mut WordApp, id: &str) -> Option<Result<Va
     Some(Ok(Value::Null))
 }
 
+/// Queue `file.checkForUpdates` off the UI thread when the host has an HTTP hook. `None` otherwise.
+pub(crate) fn before_engine_command(app: &mut WordApp, id: &str, params: &Value) -> Option<Result<Value, String>> {
+    if id != "file.checkForUpdates" || !can_run_off_thread(app) {
+        return None;
+    }
+    let ctx = app.ctx.clone()?;
+    let startup = params.get("startup").and_then(Value::as_bool) == Some(true);
+    queue_check(app, params.clone(), !startup, &ctx);
+    Some(Ok(json!({"pending": "updateCheck"})))
+}
+
+/// Update-related fields on a UI request (`quit`, `update`, reboot / macOS DMG notices).
+pub(crate) fn handle_ui_request(app: &mut WordApp, req: &Value) {
+    if req.get("quit").and_then(Value::as_bool) == Some(true) {
+        app.quit_requested = true;
+    }
+    if let Some(up) = req.get("update") {
+        apply_command_result(app, up);
+    }
+    if req.get("updateReboot").is_some() {
+        app.update.reboot_notice = true;
+    }
+    if req.get("updateMacDmg").and_then(Value::as_bool) == Some(true) {
+        app.update_feedback(tl!("Drag WordCraft into Applications, then reopen it."));
+    }
+}
+
+/// A finished update asked to quit: run the normal close path so edits made after the worker
+/// finished still get the save prompt.
+pub fn quit_requested(app: &mut WordApp) -> bool {
+    if app.update.reboot_notice {
+        return false;
+    }
+    if !std::mem::take(&mut app.update.quit_pending) {
+        return false;
+    }
+    // Don't Save was the answer for this revision: close without asking again.
+    if app.session.dirty && !app.update.unsaved_blocks(&app.session) {
+        app.quit_requested = true;
+    }
+    app.close_requested()
+}
+
+/// UI requests produced off the UI thread (for example the update-check worker).
+pub(crate) fn apply_ui_requests(app: &mut WordApp, requests: Vec<Value>) {
+    for req in requests {
+        app.handle_request(&req);
+    }
+}
+
+/// Commands that work with no open document, beyond WordCraft's usual set.
+pub(crate) fn works_without_document(id: &str) -> bool {
+    matches!(id, "file.checkForUpdates" | "file.updatePrefs")
+}
+
+/// Report a manual **Check for updates** in the status bar when the notice bar won't: a newer
+/// release already shows its own notice, but "up to date" and network errors produced no visible
+/// answer before (#15 review). Shared with the ribbon's Help ▸ Check for Updates.
+pub(crate) fn report_update_check(app: &mut WordApp, result: Result<Value, String>) {
+    match result {
+        Ok(v) => match v.get("status").and_then(Value::as_str) {
+            // `available` draws the update notice through the command's UI request; drop any answer
+            // bar left by a previous check so the two never sit together.
+            Some("available") => app.update.message = None,
+            Some("error") => {
+                let key = v.get("error").and_then(Value::as_str).unwrap_or("");
+                if let Some(detail) = v.get("errorDetail").and_then(Value::as_str) {
+                    log::warn!("update check failed: {detail}");
+                }
+                let text = if key.is_empty() { tl!(wordcraft_engine::update::MSG_CHECK_FAILED) } else { tl!(key) };
+                app.update_feedback(text);
+            }
+            // `current`, or a throttled automatic check that the user forced past: say so.
+            _ => app.update_feedback(tl!("WordCraft is up to date.")),
+        },
+        Err(e) => {
+            log::warn!("update check failed: {e}");
+            app.update_feedback(tl!(wordcraft_engine::update::MSG_CHECK_FAILED));
+        }
+    }
+}
+
 /// A check the user asked for: the notice bar shows a newer release, and the status bar answers
 /// "up to date" or why GitHub couldn't be reached.
 pub(crate) fn manual_check(app: &mut WordApp) {
@@ -151,7 +233,7 @@ pub(crate) fn manual_check(app: &mut WordApp) {
         queue_check(app, json!({"force": true}), true, &ctx);
     } else {
         let result = app.run("file.checkForUpdates", json!({"force": true}));
-        crate::backstage::report_update_check(app, result);
+        report_update_check(app, result);
     }
 }
 
@@ -190,7 +272,7 @@ fn queue_check_inner(
         } else if manual {
             // No update client to run it off the UI thread: run the command here and say how it went.
             let r = app.run("file.checkForUpdates", params);
-            crate::backstage::report_update_check(app, r);
+            report_update_check(app, r);
         }
         return false;
     };
@@ -211,7 +293,7 @@ fn queue_check_inner(
             if let Some(reply) = control_reply {
                 let _ = reply.send(json!({"ok": false, "error": msg}));
             } else if manual {
-                crate::backstage::report_update_check(app, Err(msg.into()));
+                report_update_check(app, Err(msg.into()));
             } else {
                 log::warn!("{msg}");
             }
@@ -287,7 +369,7 @@ fn apply_worker_result(app: &mut WordApp, done: WorkerDone, manual: bool, apply:
         // worker finished. `apply_install_result` reports when the close may go ahead.
         ui_requests.retain(|r| r.get("quit").and_then(Value::as_bool) != Some(true));
     }
-    app.apply_ui_requests(ui_requests);
+    apply_ui_requests(app, ui_requests);
     match done.result {
         Ok(v) => {
             if apply {
@@ -296,7 +378,7 @@ fn apply_worker_result(app: &mut WordApp, done: WorkerDone, manual: bool, apply:
                 }
                 Ok(v)
             } else if manual {
-                crate::backstage::report_update_check(app, Ok(v.clone()));
+                report_update_check(app, Ok(v.clone()));
                 Ok(v)
             } else {
                 Ok(v)
@@ -306,7 +388,7 @@ fn apply_worker_result(app: &mut WordApp, done: WorkerDone, manual: bool, apply:
             if apply {
                 let _ = apply_install_result(app, Err(e.clone()));
             } else if manual {
-                crate::backstage::report_update_check(app, Err(e.clone()));
+                report_update_check(app, Err(e.clone()));
             } else {
                 log::info!("startup update check failed: {e}");
             }
@@ -774,7 +856,7 @@ mod tests {
     #[test]
     fn reboot_notice_is_durable_until_acknowledged() {
         let mut app = crate::WordApp::new(wordcraft_engine::Session::new(wordcraft_doc::Document::new()), crate::Services::default());
-        app.apply_ui_requests(vec![json!({"quit": true}), json!({"updateReboot": true})]);
+        apply_ui_requests(&mut app, vec![json!({"quit": true}), json!({"updateReboot": true})]);
         assert!(app.update.reboot_notice, "the restart instruction is kept, not a transient status");
         assert!(app.quit_requested, "the update still asks to quit through the close path");
         app.update.reboot_notice = false;
@@ -846,7 +928,7 @@ mod tests {
     fn reboot_notice_defers_update_quit_until_acknowledged() {
         let mut app = crate::WordApp::new(wordcraft_engine::Session::new(wordcraft_doc::Document::new()), crate::Services::default());
         app.update.quit_pending = true;
-        app.apply_ui_requests(vec![json!({"updateReboot": true})]);
+        apply_ui_requests(&mut app, vec![json!({"updateReboot": true})]);
         assert!(app.update.reboot_notice);
         assert!(!app.update_quit_requested(), "do not close while the restart banner is visible");
         assert!(app.update.quit_pending, "the quit stays pending until after acknowledgement");
