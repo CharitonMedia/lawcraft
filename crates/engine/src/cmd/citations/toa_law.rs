@@ -6,6 +6,7 @@ use wordcraft_doc::para::InlineObject;
 
 /// A citation mark (Word's `TA` field) for `entry`, in `category` (TA `\c`) when given. The
 /// field is hidden text, as References › Mark Citation inserts it.
+#[allow(dead_code)] // LawCraft builds TA marks in `wordcraft-law`; kept for engine TOA helpers/tests.
 pub fn ta_field(entry: &str, category: Option<u8>) -> InlineObject {
     let entry = entry.replace('"', "");
     let instr = match category {

@@ -55,6 +55,8 @@ pub mod store;
 pub mod symbols;
 mod toa;
 mod wrap;
+mod doc_ext;
+pub use doc_ext::text_stories;
 
 use wordcraft_engine::Session;
 

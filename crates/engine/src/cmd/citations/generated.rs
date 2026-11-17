@@ -193,7 +193,10 @@ fn caption_body(p: &Paragraph, label: &str) -> String {
     rest.trim_start_matches(|c: char| c.is_whitespace() || matches!(c, ':' | '.' | '-' | '\u{2013}' | '\u{2014}')).trim_end().to_string()
 }
 
-pub const ENTRY_STYLE: &str = "ListEntry";
+pub(super) const ENTRY_STYLE: &str = "ListEntry";
+
+#[path = "toa_law.rs"]
+mod toa_law;
 
 /// Rebuild every generated list.
 pub fn update_generated(s: &mut Session) -> Result<(), CmdError> {
@@ -346,7 +349,7 @@ fn entries_for(s: &mut Session, kind: &str) -> Vec<(String, bool)> {
             .filter_map(|(k, i)| s.doc.sources.get(i).map(|x| (entry(x, st.name, k.saturating_add(1)), !st.numbered())))
             .collect();
     }
-    let toa = super::toa_law::Context::for_kind(kind);
+    let toa = toa_law::Context::for_kind(kind);
     // Collect marks with positions.
     let mut marks: Vec<(String, Pos)> = Vec::new();
     let figures = figures_label(kind);

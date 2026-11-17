@@ -465,10 +465,17 @@ pub fn save_bytes_opts(name: &str, doc: &Document, opts: &ExportOptions) -> Resu
             Ok(if opts.markup && opts.comments { wordcraft_formats::comments::append("txt", doc, bytes) } else { bytes })
         }
         "json" => serde_json::to_vec_pretty(doc).map_err(|e| e.to_string()),
-        other => match crate::io_ext::save(other, doc, opts) {
-            Some(r) => r,
-            None => Err(format!("{name}: can't save as `.{other}`")),
-        },
+        other => {
+            let mut bytes = match crate::io_ext::save(other, doc, opts) {
+                Some(r) => r?,
+                None => return Err(format!("{name}: can't save as `.{other}`")),
+            };
+            // LawCraft: appendix page-number prefixes in w:docVars for Word packages.
+            if wordcraft_docx::Flavor::from_ext(other).is_some() {
+                wordcraft_law_docx::write_page_num_prefixes(&mut bytes, doc).map_err(|e| e.to_string())?;
+            }
+            Ok(bytes)
+        }
     }
 }
 

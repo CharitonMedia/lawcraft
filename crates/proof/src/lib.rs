@@ -1,11 +1,41 @@
 //! LawCraft's proofing facade: re-exports [`craft_proof`] and adds per-session [`ModuleEn`]
 //! supplements (legal word list and grammar hooks) that craft-proof itself does not carry.
+//!
+//! [`check_text_with`] injects the session module from [`set_session_module`] so WordCraft's
+//! layout crate can stay byte-identical to upstream while still applying LawCraft proofing.
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
-pub use craft_proof::*;
+pub use craft_proof::{
+    EnglishSource, Issue, IssueKind, Options, PackLocale, ProofLang, MAX_CUSTOM_WORD_CHARS, add_word, affix, bg, check_grammar, check_grammar_in,
+    check_spelling, check_spelling_in, check_spelling_with, check_text, cs, custom_word, dict, dictionary_generation, dictionary_load_error,
+    en_variants, english_source, es, has_dictionary, hr, hunspell, hyphen, id, ignore_word, installed_dictionaries, is_correct, is_correct_for,
+    is_correct_in, is_correct_in_with, is_correct_with, it, lang, load_user_dictionary, missing_dictionary, pack_dictionary_file, packs, patterns, pl,
+    pt, remove_word, ru, save_user_dictionary, scowl, set_dictionaries_folder, suggest, suggest_in, tr, unreadable_dictionary, user_dictionary, vi,
+    words,
+};
 
+use std::cell::Cell;
 use std::ops::Range;
+
+thread_local! {
+    static SESSION_MODULE: Cell<ModuleEn> = const { Cell::new(ModuleEn { spelling: None, grammar: None }) };
+}
+
+/// Set the module supplements [`check_text_with`] applies (session / law install).
+pub fn set_session_module(module: ModuleEn) {
+    SESSION_MODULE.with(|c| c.set(module));
+}
+
+/// The module supplements [`check_text_with`] will use.
+pub fn session_module() -> ModuleEn {
+    SESSION_MODULE.with(|c| c.get())
+}
+
+/// Like craft-proof's [`craft_proof::check_text_with`], plus the session's [`ModuleEn`].
+pub fn check_text_with(text: &str, spans: &[(Range<usize>, ProofLang)], opts: &Options, grammar: bool, list_item: bool) -> Vec<Issue> {
+    check_paragraph(text, spans, opts, grammar, list_item, session_module())
+}
 
 /// English paragraph grammar check supplied by an optional module (LawCraft confusion pairs).
 pub type EnParagraphGrammarCheck = fn(&str) -> Vec<Issue>;
@@ -169,7 +199,7 @@ pub fn check_paragraph(
     list_item: bool,
     module: ModuleEn,
 ) -> Vec<Issue> {
-    let mut issues = check_text_with(text, spans, opts, grammar, list_item);
+    let mut issues = craft_proof::check_text_with(text, spans, opts, grammar, list_item);
     if module.spelling.is_some() {
         issues.retain(|i| {
             if i.kind != IssueKind::Spelling {

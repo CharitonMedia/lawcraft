@@ -1,14 +1,15 @@
-//! Wrap core WordCraft commands so LawCraft behaviour runs without patching those command files.
+//! Wrap core WordCraft commands so LawCraft module behaviour runs (print findings, ribbon add-ins).
 
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 
-use serde_json::Value;
+use serde_json::{Value, json};
 use wordcraft_engine::{CmdError, CmdResult, Session};
 
 /// Original `file.printPdf` run fn.
 static PRINT_PDF: OnceLock<fn(&mut Session, &Value) -> CmdResult> = OnceLock::new();
 /// Original `review.issues` run fn.
 static REVIEW_ISSUES: OnceLock<fn(&mut Session, &Value) -> CmdResult> = OnceLock::new();
+static CUSTOMIZE_RIBBON: OnceLock<fn(&mut Session, &Value) -> CmdResult> = OnceLock::new();
 
 fn wrap_print_pdf(s: &mut Session, v: &Value) -> CmdResult {
     let Some(orig) = PRINT_PDF.get() else {
@@ -38,6 +39,42 @@ fn wrap_review_issues(s: &mut Session, v: &Value) -> CmdResult {
     Ok(Value::Array(out))
 }
 
+fn wrap_customize_ribbon(s: &mut Session, v: &Value) -> CmdResult {
+    let Some(orig) = CUSTOMIZE_RIBBON.get() else {
+        return Err(CmdError::Failed("tools.customizeRibbon wrap missing".into()));
+    };
+    let mut v2 = v.clone();
+    let mut handled = false;
+    if let Some(x) = v.get("layout") {
+        s.ribbon.replace_layout(wordcraft_engine::RibbonLayout::from_value(x));
+        let reg = Arc::clone(&s.registry);
+        s.ribbon.retain_known(&reg);
+        if let Some(obj) = v2.as_object_mut() {
+            obj.remove("layout");
+        }
+        handled = true;
+    }
+    if v.get("reset").and_then(Value::as_bool) == Some(true) {
+        s.ribbon.reset_ribbon();
+        s.ribbon.reset_qat();
+        if let Some(obj) = v2.as_object_mut() {
+            obj.remove("reset");
+        }
+        handled = true;
+    }
+    let remaining = v2.as_object().is_some_and(|o| !o.is_empty());
+    if remaining {
+        return orig(s, &v2);
+    }
+    if handled {
+        return Ok(json!({
+            "tabs": serde_json::to_value(s.ribbon.tabs().as_ref()).unwrap_or(Value::Null),
+            "qat": s.ribbon.qat(),
+        }));
+    }
+    orig(s, v)
+}
+
 fn capture_and_replace(
     session: &mut Session,
     id: &str,
@@ -51,31 +88,9 @@ fn capture_and_replace(
     });
 }
 
-/// Enrich core command param docs LawCraft relies on (prefix, style apply/basedOn).
-fn enrich_param_docs(session: &mut Session) {
-    session.replace_command("insert.pageNumber", |mut spec| {
-        spec.params = concat!(
-            r#"{"position"?: "top|bottom|current", "align"?: "left|center|right", "format"?: "x of y","#,
-            r#" "prefix"?: string (text before the page number, e.g. appendix "A")}"#
-        );
-        spec
-    });
-    session.replace_command("styles.create", |mut spec| {
-        spec.params = concat!(
-            r#"{"name": string, "basedOn"?: string, "fromSelection"?: bool (default: true),"#,
-            r#" "apply"?: bool (apply the new style to the selection; default: true)}"#
-        );
-        spec
-    });
-    session.replace_command("styles.modify", |mut spec| {
-        spec.params = r#"{"style": string, "chr"?: CharProps, "para"?: ParaProps, "name"?: string, "basedOn"?: string, "next"?: string}"#;
-        spec
-    });
-}
-
-/// Wrap core commands LawCraft needs; safe to call on every [`crate::install`].
+/// Wrap module-facing commands; safe to call on every [`crate::install`].
 pub(crate) fn install_wraps(session: &mut Session) {
     capture_and_replace(session, "file.printPdf", &PRINT_PDF, wrap_print_pdf);
     capture_and_replace(session, "review.issues", &REVIEW_ISSUES, wrap_review_issues);
-    enrich_param_docs(session);
+    capture_and_replace(session, "tools.customizeRibbon", &CUSTOMIZE_RIBBON, wrap_customize_ribbon);
 }

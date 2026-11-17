@@ -81,7 +81,7 @@ pub(crate) fn find_entries_limited(
     {
         for path in doc.para_paths(story) {
             let Some(para) = doc.para(story, &path) else { continue };
-            if para.props.style.as_deref() == Some(wordcraft_engine::cmd::citations::ENTRY_STYLE) {
+            if para.props.style.as_deref() == Some("ListEntry") {
                 continue;
             }
             if para.text.is_empty() {

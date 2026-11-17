@@ -313,7 +313,7 @@ fn fix_spacing(s: &mut Session, v: &Value) -> CmdResult {
     if whole {
         // Every text story, not just the body: footnotes, endnotes, headers, footers and text
         // boxes carry legal signs too.
-        for story in s.doc.text_stories() {
+        for story in crate::text_stories(&s.doc) {
             for path in s.doc.para_paths(story) {
                 let para = s.doc.para_mut(story, &path)?;
                 let len = para.len();
@@ -347,7 +347,7 @@ fn fix_spacing(s: &mut Session, v: &Value) -> CmdResult {
 /// marked deleted, the non-breaking space marked inserted), so Reject All puts the spaces back.
 fn fix_spacing_tracked(s: &mut Session, whole: bool, a: &Pos, b: &Pos) -> CmdResult {
     let mut work: Vec<(StoryRef, Path, Vec<(usize, usize)>)> = Vec::new();
-    let stories = if whole { s.doc.text_stories() } else { vec![a.story] };
+    let stories = if whole { crate::text_stories(&s.doc) } else { vec![a.story] };
     for story in stories {
         let paths = if whole { s.doc.para_paths(story) } else { s.doc.paths_between(a, b) };
         for path in paths {
