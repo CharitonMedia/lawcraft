@@ -641,7 +641,7 @@ fn applying_the_federal_brief_gives_a_federal_brief() {
 #[test]
 fn applying_the_federal_brief_replaces_a_monospaced_normal_style() {
     let mut s = law();
-    let normal = s.doc.styles.styles.iter_mut().find(|st| st.name == "Normal").expect("Normal");
+    let normal = std::sync::Arc::make_mut(&mut s.doc.styles).styles.iter_mut().find(|st| st.name == "Normal").expect("Normal");
     normal.chr.font = Some("Courier New".into());
     run(&mut s, "law.profiles.apply", json!({"id": FEDERAL, "doc": "brief"}));
     let doc = roundtrip(&s);
