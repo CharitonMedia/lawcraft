@@ -141,3 +141,7 @@ Each entry that moves out of a WordCraft file into `crates/law*` (or a new LawCr
 module wired by one `mod` / one call) stops conflicting. Prefer hooks and `install_commands` /
 `core_wraps` for behaviour that does not need a WordCraft struct field. Struct fields LawCraft
 needs (for example `SectionProps::page_num_prefix`) stay where they are.
+
+## Rust toolchain
+
+`rust-toolchain.toml` is LawCraft's own file. It pins Rust 1.99.1 so a newer stable clippy cannot fail LawCraft's CI on WordCraft files LawCraft never edits (Rust 1.100's clippy flagged `crates/formats/src/latex/tests.rs` in WordCraft v0.18.1). When a WordCraft release needs a newer Rust, the sync's gate fails on the toolchain; bump the pin then.
