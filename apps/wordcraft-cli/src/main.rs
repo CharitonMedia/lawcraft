@@ -2,8 +2,14 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 mod automation_args;
+mod law_cli;
 mod script;
+mod session_boot;
 mod update_check;
+
+use law_cli::{apply_opened, enable_law, report_findings, with_law};
+use session_boot::{headless_session, session};
+use update_check::{format_update_check_json, run_update_check};
 
 use std::ffi::{OsStr, OsString};
 use std::fmt;
@@ -104,26 +110,14 @@ fn missing_argument() -> Failure {
 
 /// Open a document for a subcommand. A password-protected Word file or PDF needs its password
 /// ([`password_from`]). As in the app, a Word document opened with one is saved with it again,
-/// so `convert` does not quietly write a copy the password no longer protects. A PDF is
-/// converted into a new document (#1532): the conversion's warnings go to stderr, and it has no
-/// file of its own, so nothing is ever written back over the PDF.
+/// so `convert` does not quietly write a copy the password no longer protects.
 fn open(path: &Path, password: Option<&str>) -> Result<Session, Failure> {
     // A file that gives no page size (HTML, Markdown, plain text) opens on the system region's
     // paper, as in the app: A4 in Italy, Letter in the US (#1381).
     let region = system_region();
     let opened = wordcraft_engine::io::open_path_report_in(path, password, &region).map_err(engine_error)?;
     let mut s = session(opened.doc);
-    if let Some(summary) = opened.pdf {
-        for warning in summary.warnings {
-            eprintln!("PDF import: {warning}");
-        }
-        s.dirty = true;
-    } else {
-        s.path = Some(path.into());
-        if opened.encrypted {
-            s.password = password.map(wordcraft_engine::io::Password::new);
-        }
-    }
+    apply_opened(&mut s, path, password, opened.encrypted, opened.pdf.map(|p| p.warnings));
     Ok(s)
 }
 
@@ -204,16 +198,6 @@ fn positional_indices(args: &[String], specs: &[OptionSpec]) -> Vec<usize> {
     out
 }
 
-/// A headless session in the system region: every way the CLI starts one gives `file.new` the
-/// same paper (#1381).
-fn session(doc: wordcraft_doc::Document) -> Session {
-    let mut s = Session::new(doc);
-    // `run --cmd file.checkForUpdates` reaches the release feed like `update --check` does.
-    s.update_http = Some(update_check::http_get());
-    s.system_region = system_region();
-    s
-}
-
 /// The system region, read as the app reads it (locale variables, else the platform's locale).
 fn system_region() -> wordcraft_engine::Region {
     wordcraft_engine::Region::from_locale_vars(|name| std::env::var(name).ok(), sys_locale::get_locale)
@@ -225,101 +209,11 @@ fn listed_text(doc: &wordcraft_doc::Document) -> Result<String, String> {
     Ok(String::from_utf8_lossy(&bytes).replace("\r\n", "\n"))
 }
 
-/// Whether the LawCraft module (`law.*` commands) is on: `WORDCRAFT_LAW` for one run (`0` turns it
-/// off), else the user's setting (`modules.law` in the saved preferences, the one the app writes).
-/// On by default in LawCraft.
-fn law_enabled() -> bool {
-    if let Some(v) = std::env::var_os("WORDCRAFT_LAW") {
-        return !v.is_empty() && v != "0";
-    }
-    if std::env::var_os("WORDCRAFT_NO_PREFS").is_some() {
-        return true;
-    }
-    let Some(dir) = wordcraft_control_key::settings_dir() else { return true };
-    let Ok(bytes) = std::fs::read(dir.join("ui.json")) else { return true };
-    let Ok(saved) = serde_json::from_slice::<serde_json::Value>(&bytes) else { return true };
-    saved.pointer("/editing/modules/law").and_then(serde_json::Value::as_bool) != Some(false)
-}
-
-/// Turn the LawCraft module on for a headless session, when it is on.
-fn with_law(mut s: Session) -> Session {
-    enable_law(&mut s);
-    s
-}
-
-/// [`with_law`] for a session that already exists (the MCP bridge's headless backend).
-fn enable_law(s: &mut Session) {
-    if law_enabled() {
-        // Runs without preferences (`WORDCRAFT_NO_PREFS`) keep profiles in memory only.
-        let dir = if std::env::var_os("WORDCRAFT_NO_PREFS").is_some() { None } else { wordcraft_law::settings_dir() };
-        wordcraft_law::set_profiles_dir(dir);
-        // A headless session keeps no saved preferences, so the flag or the setting decides here.
-        s.prefs.modules.insert(wordcraft_law::MODULE.into(), true);
-        wordcraft_law::install(s);
-    }
-}
-
-/// Print an export's check findings (an applied court profile's, say) to standard error, one per
-/// line; the export itself still went through.
-fn report_findings(r: &serde_json::Value) {
-    for f in r.get("findings").and_then(serde_json::Value::as_array).into_iter().flatten() {
-        let severity = f.get("severity").and_then(serde_json::Value::as_str).unwrap_or("note");
-        let message = f.get("message").and_then(serde_json::Value::as_str).unwrap_or("");
-        eprintln!("{severity}: {message}");
-    }
-}
-
 /// `--author NAME`: the author recorded on tracked changes and comments (`file.setAuthor`).
 /// The command also checks whether the open document is protected: this name determines which
 /// named editing exceptions the session can use, so the flag must not bypass that check.
 fn set_author(s: &mut Session, name: &str) -> Result<(), String> {
     s.run("file.setAuthor", &json!({"name": name})).map(|_| ()).map_err(|e| escape_text(&format!("--author: {e}"), false))
-}
-
-/// Run `file.checkForUpdates` for `wordcraft-cli update --check` and return the result. The HTTP
-/// hook and the install-detection environment are injected so tests run offline and independent of
-/// the host; the response must stay a single JSON value on stdout, with no probe output leaking in.
-fn run_update_check(http: wordcraft_engine::update::HttpGet, env: Option<wordcraft_engine::update::EnvReadBox>) -> Result<Value, String> {
-    let mut s = Session::new(wordcraft_doc::Document::new());
-    s.update_http = Some(http);
-    s.update_env = env;
-    // A test hook (`WORDCRAFT_UPDATE_CHECK_EXE`) lets the subprocess test put the running path
-    // under `/usr/bin` so install detection actually probes `dpkg-query`; otherwise the CLI's own
-    // path is used.
-    if let Ok(exe) = std::env::var("WORDCRAFT_UPDATE_CHECK_EXE") {
-        s.update_exe = Some(exe);
-    } else if let Ok(exe) = std::env::current_exe() {
-        s.update_exe = Some(exe.to_string_lossy().into_owned());
-    }
-    s.run("file.checkForUpdates", &serde_json::json!({"force": true})).map_err(|e| e.to_string())
-}
-
-/// Pretty JSON for `wordcraft-cli update --check` (one value, trailing newline).
-fn format_update_check_json(v: &Value) -> String {
-    serde_json::to_string_pretty(v).unwrap_or_default()
-}
-
-/// Build the headless MCP session, wiring the same update HTTP hook the desktop app uses so
-/// `file.checkForUpdates` is reachable through MCP too (#15). `http` is injected so tests run with
-/// an offline fake and no request ever leaves the machine.
-fn headless_session(
-    http: wordcraft_engine::update::HttpGet,
-    author: Option<String>,
-    roots: Option<std::sync::Arc<wordcraft_engine::file_access::AutomationRoots>>,
-) -> Result<wordcraft_mcp::Headless, String> {
-    let mut headless = wordcraft_mcp::Headless::default();
-    headless.session.update_http = Some(http);
-    if let Some(roots) = roots {
-        // Every thread of this process, not only the server's: nothing reaches past the roots.
-        wordcraft_engine::file_access::confine_process(roots.clone());
-        let show = |root: Option<&std::path::Path>| root.map_or_else(|| "none".to_string(), |r| r.display().to_string());
-        eprintln!("wordcraft-cli: files confined: read root {}, write root {}", show(roots.read_root()), show(roots.write_root()));
-        headless = headless.with_automation_roots(Some(roots));
-    }
-    if let Some(name) = author {
-        set_author(&mut headless.session, &name)?;
-    }
-    Ok(headless)
 }
 
 fn arg_value(args: &[String], name: &str) -> Option<String> {
