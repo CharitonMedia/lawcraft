@@ -66,6 +66,22 @@ def windows_arm64(path):
     return text
 
 
+def linux_nfpm(path):
+    """LawCraft binaries, APP_ID and doc dir; package.sh stages lawcraft* and com.charitonmedia.lawcraft.*."""
+    text = theirs(path)
+    return replace_all(
+        text,
+        [
+            ("name: wordcraft\n", "name: lawcraft\n"),
+            ("/usr/bin/wordcraft-cli", "/usr/bin/lawcraft-cli"),
+            ("/usr/bin/wordcraft", "/usr/bin/lawcraft"),
+            ("ai.storyteller.wordcraft", "com.charitonmedia.lawcraft"),
+            ("/usr/share/doc/wordcraft/", "/usr/share/doc/lawcraft/"),
+        ],
+        path,
+    )
+
+
 def packaging_lint(path):
     """WordCraft's own installer policy job runs only in WordCraft's repository."""
     text = theirs(path)
@@ -125,6 +141,7 @@ def file_format_parity(path):
 
 FIXES = {
     "packaging/macos/package.sh": macos_package,
+    "packaging/linux/nfpm.yaml": linux_nfpm,
     ".github/workflows/windows-arm64.yml": windows_arm64,
     ".github/workflows/packaging-lint.yml": packaging_lint,
     "docs/architecture.md": architecture,

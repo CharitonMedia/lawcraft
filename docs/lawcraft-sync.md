@@ -43,6 +43,7 @@ ribbon_addins,file_access_automation,io_open}.rs`, `session/modules.rs`,
 | `Cargo.lock` | LawCraft's crates | WordCraft's version; `cargo metadata` adds LawCraft's crates back |
 | `packaging/windows/package.ps1`, `packaging/windows/wordcraft.wxs` | LawCraft's own MSI: `lawcraft.exe`, its own UpgradeCode, Program Files\LawCraft | LawCraft's version |
 | `packaging/macos/package.sh` | `LawCraft.app` and `lawcraft-*` file names | WordCraft's version, renamed by `.github/sync/known_fixes.py` |
+| `packaging/linux/nfpm.yaml` | `com.charitonmedia.lawcraft.*` and `doc/lawcraft` paths (match `package.sh` staging) | WordCraft's version, renamed by `known_fixes.py` |
 | `.github/workflows/windows-arm64.yml` | Install folder `LawCraft`, `lawcraft.exe`, `lawcraft-cli.exe` | WordCraft's version, renamed by `known_fixes.py` |
 | `.github/workflows/packaging-lint.yml` | WordCraft's installer-policy job checks WordCraft's MSI only | WordCraft's version, limited to WordCraft's repository by `known_fixes.py` |
 | `.github/workflows/release.yml` | LawCraft publishes its own releases (`build-release.yml`, its own permissions and schedule) | LawCraft's version |
