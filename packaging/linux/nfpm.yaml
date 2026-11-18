@@ -78,17 +78,17 @@ contents:
   # Named one by one rather than as a tree of /usr/share: a tree would also own shared directories
   # such as /usr/share/mime, which openSUSE's filesystem package owns with other modes, and RPM
   # refuses to install a package that conflicts with it.
-  - src: ${STAGE}/usr/share/applications/ai.storyteller.wordcraft.desktop
-    dst: /usr/share/applications/ai.storyteller.wordcraft.desktop
-  - src: ${STAGE}/usr/share/mime/packages/ai.storyteller.wordcraft.xml
-    dst: /usr/share/mime/packages/ai.storyteller.wordcraft.xml
-  - src: ${STAGE}/usr/share/metainfo/ai.storyteller.wordcraft.metainfo.xml
-    dst: /usr/share/metainfo/ai.storyteller.wordcraft.metainfo.xml
+  - src: ${STAGE}/usr/share/applications/com.charitonmedia.lawcraft.desktop
+    dst: /usr/share/applications/com.charitonmedia.lawcraft.desktop
+  - src: ${STAGE}/usr/share/mime/packages/com.charitonmedia.lawcraft.xml
+    dst: /usr/share/mime/packages/com.charitonmedia.lawcraft.xml
+  - src: ${STAGE}/usr/share/metainfo/com.charitonmedia.lawcraft.metainfo.xml
+    dst: /usr/share/metainfo/com.charitonmedia.lawcraft.metainfo.xml
   - src: ${STAGE}/usr/share/icons/hicolor/
     dst: /usr/share/icons/hicolor/
     type: tree
-  - src: ${STAGE}/usr/share/doc/wordcraft/
-    dst: /usr/share/doc/wordcraft/
+  - src: ${STAGE}/usr/share/doc/lawcraft/
+    dst: /usr/share/doc/lawcraft/
     type: tree
 
 scripts:

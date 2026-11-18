@@ -1,6 +1,16 @@
 # LawCraft pins its Rust toolchain so a new stable clippy release cannot fail CI on
 # WordCraft code LawCraft does not edit. Bump it when a WordCraft release needs a newer Rust.
+# targets: every --target used by .github/workflows/build-release.yml and the packaging
+# scripts it calls (macos/windows/linux/web). Host linux/freebsd builds need no extra entry.
 [toolchain]
 channel = "1.99.1"
 components = ["rustfmt", "clippy"]
-targets = ["wasm32-unknown-unknown"]
+targets = [
+    "aarch64-apple-darwin",
+    "x86_64-apple-darwin",
+    "x86_64-pc-windows-msvc",
+    "i686-pc-windows-msvc",
+    "aarch64-pc-windows-msvc",
+    "riscv64gc-unknown-linux-gnu",
+    "wasm32-unknown-unknown",
+]
