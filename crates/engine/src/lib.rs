@@ -10,6 +10,9 @@ pub mod catalog;
 pub mod cmd;
 pub(crate) mod doc_state;
 pub mod file_access;
+#[path = "file_access_automation.rs"]
+mod file_access_automation;
+pub use file_access_automation::{automation_confined, automation_invoked, invoke_automation, require_human};
 pub mod hooks;
 pub(crate) mod ime;
 pub mod io;
@@ -18,6 +21,7 @@ pub mod keymap;
 pub mod lint;
 pub(crate) mod locale;
 pub mod math_gallery;
+pub mod packs;
 pub(crate) mod prefs;
 pub mod print;
 pub mod recovery;
@@ -26,6 +30,7 @@ pub mod sample;
 mod session;
 pub(crate) mod snapshot;
 pub mod speech;
+pub mod strict;
 pub mod update;
 pub(crate) mod view;
 
@@ -109,9 +114,6 @@ pub struct CommandSpec {
     /// Parameter description for agents (`{"size": number}`).
     pub params: &'static str,
     pub mutates: bool,
-    /// Replaces the open document with another (like File › New): an interface asks to save
-    /// unsaved changes first, as it does for its own New, Open and Close.
-    pub replaces_document: bool,
     /// `None` = enabled; `Some(reason)` = disabled.
     pub enabled: fn(&Session) -> Option<&'static str>,
     pub run: fn(&mut Session, &Value) -> CmdResult,
@@ -121,9 +123,21 @@ fn always(_: &Session) -> Option<&'static str> {
     None
 }
 
+/// Command ids that replace the open document (File › New style): kept beside the registry so
+/// WordCraft's [`CommandSpec`] field layout stays upstream-identical.
+fn replaces_document_ids() -> &'static std::sync::Mutex<std::collections::HashSet<&'static str>> {
+    static IDS: std::sync::OnceLock<std::sync::Mutex<std::collections::HashSet<&'static str>>> = std::sync::OnceLock::new();
+    IDS.get_or_init(|| std::sync::Mutex::new(std::collections::HashSet::new()))
+}
+
+/// Whether `id` replaces the open document (save prompt before run).
+pub fn command_replaces_document(id: &str) -> bool {
+    replaces_document_ids().lock().map(|g| g.contains(id)).unwrap_or(false)
+}
+
 impl CommandSpec {
     pub const fn new(id: &'static str, label: &'static str, location: &'static str, run: fn(&mut Session, &Value) -> CmdResult) -> Self {
-        CommandSpec { id, label, location, shortcut: "", params: "{}", mutates: true, replaces_document: false, enabled: always, run }
+        CommandSpec { id, label, location, shortcut: "", params: "{}", mutates: true, enabled: always, run }
     }
     pub const fn key(mut self, s: &'static str) -> Self {
         self.shortcut = s;
@@ -138,9 +152,12 @@ impl CommandSpec {
         self.mutates = false;
         self
     }
-    /// Replaces the open document ([`CommandSpec::replaces_document`]).
-    pub const fn replaces_document(mut self) -> Self {
-        self.replaces_document = true;
+    /// Replaces the open document: an interface asks to save unsaved changes first, as it does
+    /// for its own New, Open and Close. Records `id` in a side set ([`command_replaces_document`]).
+    pub fn replaces_document(self) -> Self {
+        if let Ok(mut g) = replaces_document_ids().lock() {
+            g.insert(self.id);
+        }
         self
     }
     pub const fn when(mut self, f: fn(&Session) -> Option<&'static str>) -> Self {
@@ -205,6 +222,11 @@ pub mod p {
     pub fn u64(v: &Value, k: &str) -> Option<u64> {
         v.get(k).and_then(|x| x.as_u64().or_else(|| x.as_f64().filter(|f| *f >= 0.0 && f.is_finite()).map(|f| f as u64)))
     }
+    /// A 1-based page parameter as a 0-based index. A value that cannot fit in
+    /// `usize` (32-bit and wasm) saturates instead of wrapping to page 1.
+    pub fn page_index(page: u64) -> usize {
+        usize::try_from(page.max(1)).unwrap_or(usize::MAX).saturating_sub(1)
+    }
     pub fn bool(v: &Value, k: &str) -> Option<bool> {
         v.get(k).and_then(Value::as_bool)
     }
@@ -218,3 +240,5 @@ pub mod p {
 mod tests;
 #[cfg(test)]
 mod tests_hooks;
+#[cfg(test)]
+mod tests_law;

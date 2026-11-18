@@ -8,8 +8,19 @@ use serde_json::{Value, json};
 use wordcraft_doc::para::InlineObject;
 use wordcraft_doc::props::CharProps;
 use wordcraft_doc::{Block, Paragraph, Path, Pos, StoryRef};
-use wordcraft_engine::cmd::citations::{ENTRY_STYLE, ta_field};
 use wordcraft_engine::{CmdError, Selection, Session, p};
+
+/// Same style WordCraft's generated TOA entries use (`ListEntry`).
+const ENTRY_STYLE: &str = "ListEntry";
+
+fn ta_field(entry: &str, category: Option<u8>) -> InlineObject {
+    let entry = entry.replace('"', "");
+    let instr = match category {
+        Some(c) => format!("TA \\l \"{entry}\" \\c {c}"),
+        None => format!("TA \\l \"{entry}\""),
+    };
+    InlineObject::Field { instr, result: String::new(), locked: false, dirty: false, code: false, form: String::new() }
+}
 
 use crate::checks;
 use crate::citations::{CitationEntry, find_entries, group_heading};

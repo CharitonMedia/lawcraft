@@ -3,7 +3,7 @@
 
 use std::process::{Command, Output};
 
-const SUBCOMMANDS: [&str; 11] = ["convert", "info", "text", "inspect", "render", "run", "commands", "parity", "mcp", "zotero", "update"];
+const SUBCOMMANDS: [&str; 10] = ["convert", "info", "text", "inspect", "render", "run", "commands", "parity", "mcp", "zotero"];
 
 fn cli(args: &[&str]) -> Output {
     // `output()` gives the child no stdin, so `mcp` can't wait for a client.

@@ -1,17 +1,13 @@
 [package]
 name = "wordcraft-proof"
-version.workspace = true
+version = "0.1.0"
 edition.workspace = true
 license.workspace = true
-description = "WordCraft proofing per language: spelling, suggestions, grammar checks and hyphenation for English (public-domain word list) and Polish (installed Hunspell dictionary, TeX patterns)"
+description = "LawCraft proofing facade: craft-proof plus per-session ModuleEn supplements"
 
 [lints]
 workspace = true
 
 [dependencies]
-log = { workspace = true }
-miniz_oxide = "0.9"
-unicode-normalization = "0.1"
-
-[dev-dependencies]
-proptest = { workspace = true }
+# Same craft-proof rev WordCraft pins as wordcraft-proof.
+craft-proof = { package = "craft-proof", git = "https://github.com/storytold/craft-libs", rev = "01315d9c92b5b0e69082d35ca56099461a1efd45", version = "=0.1.0" }

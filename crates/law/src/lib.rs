@@ -46,6 +46,7 @@ pub mod citations;
 pub mod cmd;
 pub mod contacts;
 pub mod courts;
+mod doc_ext;
 pub mod footer_title;
 pub mod pleading_paper;
 pub mod pleadings;
@@ -54,6 +55,8 @@ mod proofing;
 pub mod store;
 pub mod symbols;
 mod toa;
+mod wrap;
+pub use doc_ext::text_stories;
 
 use wordcraft_engine::Session;
 
@@ -87,16 +90,17 @@ pub fn ribbon_groups() -> Vec<wordcraft_engine::ribbon::CustomGroup> {
 /// after it has read the user's preferences, and points the profile store at the user's own
 /// profiles folder first ([`set_profiles_dir`]).
 pub fn install(session: &mut Session) -> usize {
-    session.module_en = wordcraft_proof::ModuleEn::default();
+    session.set_module_en(wordcraft_proof::ModuleEn::default());
     session.relayout();
     session.ribbon.remove_addin_tab(RIBBON_TAB);
     if !session.module_enabled(MODULE) {
         uninstall(session);
         return 0;
     }
-    session.module_en = proofing::module_hooks();
+    session.set_module_en(proofing::module_hooks());
     checks::register_document_hook();
     symbols::register_text_hook();
+    wrap::install_wraps(session);
     session.ribbon.set_addin_tab(RIBBON_TAB, ribbon_groups());
     // A host may open the file *before* it installs LawCraft (`Session::new(doc)`), so the
     // document-loaded hook never runs for it. Restore the applied profile's export checks from

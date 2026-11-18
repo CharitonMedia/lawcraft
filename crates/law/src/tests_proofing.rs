@@ -403,3 +403,43 @@ fn mixed_case_rsmo_spells_clean_only_with_lawcraft() {
     let off = check_spelling_with_module(text, &opts, ModuleEn::default());
     assert!(off.iter().any(|i| text.get(i.start..i.end) == Some("RSMo")), "without LawCraft, RSMo is flagged: {off:?}");
 }
+
+/// Spelling issues for `needle` on the first body paragraph, via the real session layout path
+/// (squiggles), not [`check_text_with_module`].
+fn layout_spelling_hits(session: &mut Session, needle: &str) -> usize {
+    session.view.proofing = true;
+    session.relayout();
+    let layout = session.layout();
+    let text = session.doc.plain_text(StoryRef::Body);
+    layout
+        .pages
+        .iter()
+        .flat_map(|p| p.items.iter())
+        .filter_map(|it| match it {
+            wordcraft_engine::layout::Placed::Lines { para, .. } => Some(para),
+            _ => None,
+        })
+        .flat_map(|para| para.issues.iter().filter(|(_, _, grammar)| !*grammar))
+        .filter(|(start, end, _)| text.get(*start..*end) == Some(needle))
+        .count()
+}
+
+/// Creating another session on the same thread must not clear LawCraft session A's module.
+/// Probe: law-enabled A, then plain B via `Session::new`; layout both through the real path.
+/// A stays quiet on `RSMo`, B flags it; a third plain session still leaves A quiet.
+#[test]
+fn session_module_does_not_bleed_when_another_session_is_created() {
+    let mut a = law();
+    // Trailing word so the caret's typing-word suppress does not hide RSMo squiggles.
+    run(&mut a, "text.insert", json!({"text": "See RSMo here."}));
+    assert_eq!(layout_spelling_hits(&mut a, "RSMo"), 0, "law session A must not flag RSMo");
+
+    let mut b = Session::new(Document::new());
+    run(&mut b, "text.insert", json!({"text": "See RSMo here."}));
+    assert_eq!(layout_spelling_hits(&mut a, "RSMo"), 0, "A must stay quiet after Session::new for B");
+    assert_eq!(layout_spelling_hits(&mut b, "RSMo"), 1, "plain B must flag RSMo");
+
+    let _c = Session::new(Document::new());
+    assert_eq!(layout_spelling_hits(&mut a, "RSMo"), 0, "A must stay quiet after a third Session::new");
+    assert_eq!(layout_spelling_hits(&mut b, "RSMo"), 1, "B must still flag RSMo after C");
+}

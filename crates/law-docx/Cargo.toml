@@ -1,0 +1,18 @@
+[package]
+name = "wordcraft-law-docx"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "LawCraft OOXML helpers: appendix page-number prefixes in w:docVars"
+
+[lints]
+workspace = true
+
+[dependencies]
+wordcraft-doc = { workspace = true }
+quick-xml = { workspace = true }
+zip = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+wordcraft-doc = { workspace = true, features = ["test-support"] }

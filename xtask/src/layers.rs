@@ -38,11 +38,13 @@ pub const TABLE: &[(&str, Class)] = &[
     ("doc", Class::Layer(1)),
     ("fonts", Class::Layer(1)),
     ("metafile", Class::Layer(1)),
-    ("proof", Class::Layer(1)),
     ("layout", Class::Layer(2)),
     ("docx", Class::Layer(2)),
+    ("law-docx", Class::Layer(2)),
     ("docbin", Class::Layer(2)),
     ("formats", Class::Layer(2)),
+    // Facades craft-proof (external); no workspace deps — same band as fonts.
+    ("proof", Class::Layer(1)),
     ("render", Class::Layer(3)),
     ("pdf", Class::Layer(3)),
     ("engine", Class::Layer(4)),
@@ -63,7 +65,8 @@ pub const TABLE: &[(&str, Class)] = &[
 /// The L0 foundation is a small chain: `raster` builds on `color` and
 /// `geom`, which the §3 diagram draws on one line. The GPU backend (`gpu`)
 /// reuses the CPU reference (`compose`) for LUTs and parity tests.
-pub const INTRA_LAYER_ORDER: &[&[&str]] = &[&["doc", "fonts"], &["ui-egui", "law-ui"]];
+// law-docx before docx: same-layer order only; page_num_prefix regression tests live in crates/law.
+pub const INTRA_LAYER_ORDER: &[&[&str]] = &[&["doc", "fonts"], &["law-docx", "docx"], &["ui-egui", "law-ui"]];
 
 fn intra_layer_allowed(from: &str, to: &str) -> bool {
     let (from, to) = (short_name(from), short_name(to));

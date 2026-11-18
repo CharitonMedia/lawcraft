@@ -91,3 +91,17 @@ fn text_autoformat_hook_runs_from_text_insert() {
     s.run("text.insert", &json!({"text": "z"})).unwrap();
     assert_eq!(HIT.load(Ordering::SeqCst), before + 1);
 }
+
+#[test]
+fn update_fields_runs_registered_hooks() {
+    static CALLED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    fn mark(_: &mut Session) -> Result<(), crate::CmdError> {
+        CALLED.store(true, std::sync::atomic::Ordering::SeqCst);
+        Ok(())
+    }
+    let _hooks = Hooks::new();
+    hooks::register_on_update_fields(mark);
+    let mut s = Session::new(Document::new());
+    s.run("references.updateFields", &json!({})).unwrap();
+    assert!(CALLED.load(std::sync::atomic::Ordering::SeqCst));
+}

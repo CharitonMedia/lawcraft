@@ -11,6 +11,7 @@ use std::sync::mpsc::RecvTimeoutError;
 use std::time::Duration;
 
 use wordcraft_engine::update::HttpGet;
+use wordcraft_ui_egui::WordApp;
 
 /// Connecting, sending the request and the response's headers.
 const CONNECT: Duration = Duration::from_secs(30);
@@ -81,6 +82,32 @@ fn read_until_stalled<R: Read + Send + 'static>(mut reader: R, max_bytes: usize,
             Err(RecvTimeoutError::Disconnected) => return Err("the download ended unexpectedly".into()),
         }
     }
+}
+
+/// Install the LawCraft add-in and take over WordCraft's updater before preferences load.
+pub fn install_addin(app: &mut WordApp, prefs_enabled: bool) {
+    wordcraft_law::set_profiles_dir(if prefs_enabled { wordcraft_law::settings_dir() } else { None });
+    app.add_addin(Box::new(wordcraft_law_ui::LawAddIn::default()));
+    wordcraft_ui_egui::update::take_over_wordcraft_updates(app);
+}
+
+/// Turn LawCraft on when the user has no saved module preference yet.
+pub fn ensure_module_on(app: &mut WordApp) {
+    if !app.session.prefs.modules.contains_key(wordcraft_law::MODULE) {
+        let mut modules = serde_json::Map::new();
+        modules.insert(wordcraft_law::MODULE.into(), true.into());
+        let _ = app.execute("file.options", serde_json::json!({ "modules": modules }));
+    }
+}
+
+/// Wire LawCraft's update hooks (HTTP, installer handoff, exe path) and the first-run prompt.
+pub fn wire(app: &mut WordApp) {
+    app.session.update_http = Some(http_get());
+    app.session.update_install = Some(crate::update_install::handoff());
+    if let Ok(exe) = std::env::current_exe() {
+        app.session.update_exe = Some(exe.to_string_lossy().into_owned());
+    }
+    wordcraft_ui_egui::update::maybe_startup_prompt(app);
 }
 
 #[cfg(test)]

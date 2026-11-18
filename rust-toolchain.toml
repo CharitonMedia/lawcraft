@@ -1,0 +1,6 @@
+# LawCraft pins its Rust toolchain so a new stable clippy release cannot fail CI on
+# WordCraft code LawCraft does not edit. Bump it when a WordCraft release needs a newer Rust.
+[toolchain]
+channel = "1.99.1"
+components = ["rustfmt", "clippy"]
+targets = ["wasm32-unknown-unknown"]

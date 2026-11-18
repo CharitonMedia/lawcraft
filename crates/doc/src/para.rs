@@ -254,7 +254,7 @@ impl Paragraph {
 
     /// Number of objects in `text[..off]`.
     fn objects_before(&self, off: usize) -> usize {
-        self.text.get(..off).map(|t| t.chars().filter(|c| *c == OBJ).count()).unwrap_or(0)
+        self.text.get(..off).map(|t| t.chars().inspect(|_| crate::work::steps(1)).filter(|c| *c == OBJ).count()).unwrap_or(0)
     }
 
     /// The object at byte `off` (which must hold U+FFFC).
@@ -273,13 +273,13 @@ impl Paragraph {
     }
     /// Byte offsets of all objects, in order.
     pub fn object_offsets(&self) -> Vec<usize> {
-        self.text.char_indices().filter(|(_, c)| *c == OBJ).map(|(i, _)| i).collect()
+        self.text.char_indices().inspect(|_| crate::work::steps(1)).filter(|(_, c)| *c == OBJ).map(|(i, _)| i).collect()
     }
     /// (byte offset, object) for every object, in text order, in one pass. Prefer it to
     /// [`Paragraph::object_offsets`] + [`Paragraph::object_at`], which counts the objects before
     /// each offset again, so a loop over a paragraph's objects is quadratic (#3614).
     pub fn objects_with_offsets(&self) -> impl Iterator<Item = (usize, &InlineObject)> + '_ {
-        self.text.char_indices().filter(|(_, c)| *c == OBJ).map(|(i, _)| i).zip(self.objects.iter())
+        self.text.char_indices().inspect(|_| crate::work::steps(1)).filter(|(_, c)| *c == OBJ).map(|(i, _)| i).zip(self.objects.iter())
     }
 
     /// Insert plain text (U+FFFC is dropped) at `off` with `props`. Returns the inserted length.
@@ -734,22 +734,6 @@ mod tests {
         assert_eq!(p.runs.len(), 1);
         p.delete(0, 4).unwrap();
         assert!(p.runs.is_empty());
-    }
-
-    #[test]
-    fn proof_text_keeps_byte_offsets_with_fields() {
-        let mut p = Paragraph::with_text("The statue of limitations.", CharProps::default());
-        p.insert_object(
-            0,
-            InlineObject::Field { instr: "PAGE".into(), result: "99999".into(), locked: false, code: false, dirty: false, form: String::new() },
-            &CharProps::default(),
-        )
-        .unwrap();
-        assert_ne!(p.plain_text(), p.proof_text(), "plain text expands the field result");
-        let statue = p.text.find("statue").expect("statue in storage");
-        let proof = p.proof_text();
-        let issue_start = proof.find("statue").expect("statue in proof text");
-        assert_eq!(issue_start, statue, "proof_text offsets match paragraph storage");
     }
 
     #[test]

@@ -135,7 +135,7 @@ impl Store {
     /// Mark a profile verified (a person's action outside automation). A bundled profile is copied
     /// to the user's folder first, so the person's approval is theirs and survives an update.
     pub fn approve(&mut self, id: &str) -> Result<Profile, LawError> {
-        wordcraft_engine::file_access::require_human("approving a court profile").map_err(LawError::HumanOnly)?;
+        wordcraft_engine::require_human("approving a court profile").map_err(LawError::HumanOnly)?;
         let Some(existing) = self.get(id) else { return Err(LawError::NotFound(id.to_string())) };
         let mut approved = existing.clone();
         approved.verified = true;
@@ -273,6 +273,7 @@ pub fn bundled() -> Vec<Profile> {
 }
 
 /// `path` as a string, or an error when it isn't UTF-8.
+#[cfg(not(target_arch = "wasm32"))]
 fn path_str(path: &Path) -> Result<String, LawError> {
     path.to_str().map(str::to_string).ok_or_else(|| LawError::Io(format!("path is not UTF-8: {}", path.display())))
 }
@@ -367,7 +368,7 @@ mod tests {
         let mut store = Store::new(None);
         let mut p = profile("mine");
         store.save(&mut p).expect("save");
-        let err = wordcraft_engine::file_access::invoke_automation(|| store.approve("mine")).expect_err("automation");
+        let err = wordcraft_engine::invoke_automation(|| store.approve("mine")).expect_err("automation");
         assert!(matches!(err, LawError::HumanOnly(_)), "{err}");
     }
 

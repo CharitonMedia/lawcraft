@@ -631,7 +631,9 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn deadline_terminates_the_child_promptly() {
-        let child = Command::new("/bin/sh").args(["-c", "sleep 30"]).spawn().expect("spawn sleep");
+        // Spawn `sleep` directly (not via `sh -c`): killing the shell would leave the sleep
+        // grandchild running and nextest would report this test as leaky.
+        let child = Command::new("sleep").arg("30").spawn().expect("spawn sleep");
         let start = std::time::Instant::now();
         assert!(wait_child(child, 1).is_err(), "the deadline is enforced");
         assert!(start.elapsed() < std::time::Duration::from_secs(20), "termination does not wait for the sleep");

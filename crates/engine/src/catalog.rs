@@ -20,7 +20,6 @@ File|Backstage|Properties|file.properties
 File|Backstage|Export PDF|file.exportPdf
 File|Backstage|Export Image|file.exportPng
 File|Backstage|Options|file.options
-Help|Help|Check for Updates|file.checkForUpdates
 File|Options|Numerals|view.numeral
 File|Backstage|Share|file.share
 File|Backstage|Protect Document|file.protect
@@ -71,6 +70,7 @@ Home|Font|Character Shading|format.shading
 Home|Font|Font Dialog|format.fontDialog
 Home|Font|Double Strikethrough|format.doubleStrikethrough
 Home|Font|Small Caps|format.smallCaps
+Home|Font|Emphasis Mark|format.emphasisMark
 Home|Font|All Caps|format.allCaps
 Home|Font|Hidden|format.hidden
 Home|Font|Emboss|format.emboss

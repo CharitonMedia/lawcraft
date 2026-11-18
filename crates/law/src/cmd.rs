@@ -131,7 +131,7 @@ pub fn specs() -> Vec<CommandSpec> {
             // confined agent session may keep or set the verified flag from the file. A confined
             // agent may reach a file that says `"verified": true` (or pass the override) without
             // the automation marker, so confinement counts too.
-            if wordcraft_engine::file_access::automation_invoked() || wordcraft_engine::file_access::automation_confined() {
+            if wordcraft_engine::automation_invoked() || wordcraft_engine::automation_confined() {
                 p.verified = false;
             } else if let Some(verified) = p::bool(v, "verified") {
                 p.verified = verified;

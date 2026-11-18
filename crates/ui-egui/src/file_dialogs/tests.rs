@@ -315,7 +315,8 @@ fn save_as_answer_arriving_later_is_saved() {
     typed(&mut a);
     a.save_as_dialog();
     assert!(a.file_dialog_open());
-    assert_eq!(shown.borrow()[0].0, FileDialogRequest::Save { name: "Document1.docx".into(), dir: None });
+    // A new document is offered its first words as its name, as in Word (#5793).
+    assert_eq!(shown.borrow()[0].0, FileDialogRequest::Save { name: format!("{UNSAVED}.docx"), dir: None });
     let ctx = egui::Context::default();
     let frame = |a: &mut WordApp| ctx.run_ui(egui::RawInput::default(), |ui| a.logic(ui.ctx())).drop_without_applying_deltas();
     frame(&mut a);
@@ -709,18 +710,4 @@ fn many_failed_fonts_end_with_a_count() {
     a.add_fonts(paths).unwrap();
     let msg = a.status_msg.as_ref().map(|(m, _)| m.clone()).unwrap_or_default();
     assert_eq!(msg, "Added 0 fonts; 5 couldn't be read: f0.ttf, f1.ttf, f2.ttf and 2 more");
-}
-
-#[test]
-fn pdf_import_picker_and_report_keep_the_conversion_unsaved() {
-    assert!(open_filters("document")[0].1.contains(&"pdf"));
-    let (mut app, _) = async_app();
-    let bytes = wordcraft_engine::io::save_bytes("original.pdf", &wordcraft_doc::Document::from_text("Editable in the window")).unwrap();
-    app.run("file.open", json!({"path": "original.pdf", "data": wordcraft_engine::cmd::insert::base64_encode(&bytes)})).unwrap();
-    assert!(body_text(&app).contains("Editable in the window"));
-    assert!(app.session.dirty && app.session.path.is_none());
-    assert!(matches!(&app.dialog, Some(crate::dialogs::Dialog::PdfImportReport { warnings }) if !warnings.is_empty()));
-    app.dialog = None;
-    app.run("text.insert", json!({"text": "Edited: "})).unwrap();
-    assert!(body_text(&app).starts_with("Edited: "));
 }

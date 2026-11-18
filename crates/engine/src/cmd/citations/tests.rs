@@ -786,49 +786,117 @@ fn gost_numbers_follow_its_name_or_title_sort() {
     assert!(find_style("").is_none() && find_style("Vancouver").is_none());
 }
 
-/// A table of authorities per category (TOA `\c`) lists only that category's marks, and `\p`
-/// prints "passim" for an authority cited on five or more pages, as Word does.
-#[test]
-fn table_of_authorities_categories_and_passim() {
-    let mut s = Session::new(wordcraft_doc::Document::from_text("Smith v. Jones\nSection 1.010\nTail"));
-    s.run("select.text", &json!({"text": "Smith v. Jones"})).unwrap();
-    s.run("references.markCitation", &json!({"category": 1})).unwrap();
-    s.run("select.text", &json!({"text": "Section 1.010"})).unwrap();
-    s.run("references.markCitation", &json!({"category": 2})).unwrap();
-    assert!(s.run("references.markCitation", &json!({"entry": "x", "category": 17})).is_err());
-    assert!(fields(&s).iter().any(|f| f.0 == "TA \\l \"Smith v. Jones\" \\c 1"), "{:?}", fields(&s));
-    for k in 0..5 {
-        s.run("caret.docEnd", &json!({})).unwrap();
-        s.run("text.pageBreak", &json!({})).unwrap();
-        s.run("text.newParagraph", &json!({})).unwrap();
-        s.run("text.insert", &json!({"text": format!("Again {k}")})).unwrap();
+fn lookup_session(tags: &[&str]) -> Session {
+    let mut p = Paragraph::new();
+    for tag in tags {
+        p.insert_object(
+            p.len(),
+            InlineObject::Field {
+                instr: format!("CITATION {tag}"),
+                result: "Original cache".into(),
+                locked: false,
+                dirty: true,
+                code: false,
+                form: String::new(),
+            },
+            &CharProps::default(),
+        )
+        .unwrap();
     }
-    for k in 0..5 {
-        s.run("select.text", &json!({"text": format!("Again {k}")})).unwrap();
-        s.run("references.markCitation", &json!({"entry": "Smith v. Jones", "category": 1})).unwrap();
-    }
-    s.run("caret.docEnd", &json!({})).unwrap();
-    s.run("text.newParagraph", &json!({})).unwrap();
-    s.run("references.tableOfAuthorities", &json!({"category": 1, "passim": true, "title": "Cases"})).unwrap();
-    s.run("caret.docEnd", &json!({})).unwrap();
-    s.run("text.newParagraph", &json!({})).unwrap();
-    s.run("references.tableOfAuthorities", &json!({"category": 2, "title": "Statutes"})).unwrap();
-    assert!(fields(&s).iter().any(|f| f.0 == "TOA \\c \"1\" \\p"), "{:?}", fields(&s));
-    let t = s.doc.plain_text(StoryRef::Body);
-    assert!(t.contains("Smith v. Jones\tpassim"), "{t}");
-    assert!(t.contains("Section 1.010\t1"), "{t}");
-    let cases = t.find("Cases").unwrap();
-    let statutes = t.find("Statutes").unwrap();
-    let sec = t.rfind("Section 1.010\t").unwrap();
-    assert!(sec > statutes && statutes > cases, "statutes listed under Statutes only: {t}");
-    assert!(!t[cases..statutes].contains("Section 1.010"), "{t}");
-    assert!(s.run("references.tableOfAuthorities", &json!({"category": 0})).is_err());
+    let mut doc = Document::new();
+    doc.body = vec![wordcraft_doc::para_block(p)];
+    Session::new(doc)
 }
 
 #[test]
-fn field_switch_values() {
-    assert_eq!(switch_value(r#"TOA \h \c "4" \p"#, 'c').as_deref(), Some("4"));
-    assert_eq!(switch_value(r#"TA \l "Doe, 1 U.S. 1 \c" \c 2"#, 'c').as_deref(), Some("2"));
-    assert_eq!(switch_value("TOA", 'c'), None);
-    assert!(has_switch(r#"TOA \c "1" \p"#, 'p') && !has_switch(r#"TOA \c "1""#, 'p'));
+fn citation_source_lookups_keep_first_duplicates_case_and_style_order() {
+    let mut s = lookup_session(&["A", "B", "missing", "a", "B"]);
+    s.doc.sources = [
+        ("B", "Zed, Zo", "Zulu"),
+        ("A", "Able, Ann", "Alpha"),
+        ("B", "Baker, Ben", "Beta duplicate"),
+        ("a", "Middle, May", "Middle"),
+        ("unused", "Other, One", "Unused"),
+    ]
+    .into_iter()
+    .map(|(tag, author, title)| Source { tag: tag.into(), author: author.into(), title: title.into(), year: "2024".into(), ..Default::default() })
+    .collect();
+    let original = s.doc.clone();
+    for st in &STYLES {
+        s.bib_style = st.name.into();
+        let expected = if st.order == Order::Cited { vec![1, 0, 3] } else { vec![1, 2, 3, 0] };
+        assert_eq!(sources::bib_order(&s.doc, st, None), expected, "{}", st.name);
+        update_citations(&mut s).unwrap();
+        let p = s.doc.para(StoryRef::Body, &Path::top(0)).unwrap();
+        for (k, (source, number)) in [(1, 1), (0, 2), (usize::MAX, 0), (3, 3), (0, 2)].into_iter().enumerate() {
+            let InlineObject::Field { instr, result, locked, dirty, code, form } = &p.objects[k] else { panic!() };
+            let InlineObject::Field { instr: before, .. } = &original.para(StoryRef::Body, &Path::top(0)).unwrap().objects[k] else { panic!() };
+            assert_eq!(instr, before);
+            let expected = original.sources.get(source).map(|x| cite(x, st.name, number, "")).unwrap_or_else(|| "Original cache".into());
+            assert_eq!(result, &expected, "{}: {instr}", st.name);
+            assert!(!locked && *dirty && !code && form.is_empty());
+        }
+        assert_eq!(s.doc.sources, original.sources);
+    }
+    // Without citations even duplicate and unused source records remain in the bibliography.
+    s.doc.body.clear();
+    assert_eq!(sources::bib_order(&s.doc, style("IEEE"), None), vec![0, 1, 2, 3, 4]);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn citation_refresh_source_lookup_work_scales_with_document_size() {
+    fn doc(n: usize) -> Session {
+        let mut p = Paragraph::new();
+        p.text = wordcraft_doc::para::OBJ.to_string().repeat(n);
+        p.runs = vec![wordcraft_doc::Run { len: p.text.len(), props: CharProps::default() }];
+        p.objects = (0..n)
+            .rev()
+            .map(|i| InlineObject::Field {
+                instr: format!("CITATION T{i}"),
+                result: String::new(),
+                locked: false,
+                dirty: false,
+                code: false,
+                form: String::new(),
+            })
+            .collect();
+        let mut d = Document::new();
+        d.body = vec![wordcraft_doc::para_block(p)];
+        d.sources = (0..n).map(|i| Source { tag: format!("T{i}"), ..Default::default() }).collect();
+        let mut s = Session::new(d);
+        s.bib_style = "IEEE".into();
+        s
+    }
+    // Use the running thread's CPU time on Linux; scheduler pauses are not lookup work.
+    fn cost(f: &mut impl FnMut()) -> f64 {
+        let ran = || std::fs::read_to_string("/proc/thread-self/schedstat").ok()?.split_whitespace().next()?.parse::<u64>().ok();
+        let (t, before) = (std::time::Instant::now(), ran());
+        f();
+        match (before, ran()) {
+            (Some(a), Some(b)) if b > a => (b - a) as f64 * 1e-9,
+            _ => t.elapsed().as_secs_f64(),
+        }
+    }
+    const SCALE: usize = 8;
+    let (mut small, mut big) = (doc(2_000), doc(SCALE * 2_000));
+    update_citations(&mut small).unwrap();
+    update_citations(&mut big).unwrap();
+    let (mut a, mut b) = (f64::INFINITY, f64::INFINITY);
+    for _ in 0..5 {
+        a = a.min(
+            cost(&mut || {
+                for _ in 0..SCALE {
+                    update_citations(&mut small).unwrap();
+                }
+            }) / SCALE as f64,
+        );
+        b = b.min(cost(&mut || {
+            update_citations(&mut big).unwrap();
+        }));
+    }
+    let ratio = b / a.max(1e-9);
+    assert!(ratio < 32.0, "citation refresh: {a:.6}s -> {b:.6}s, {ratio:.1}x for {SCALE}x input");
+    let p = big.doc.para(StoryRef::Body, &Path::top(0)).unwrap();
+    assert!(p.objects.iter().enumerate().all(|(i, o)| matches!(o, InlineObject::Field { result, .. } if result == &format!("[{}]", i + 1))));
 }

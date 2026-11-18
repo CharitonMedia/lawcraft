@@ -56,3 +56,15 @@ fn update_check_subprocess_stdout_is_one_json_value() {
     assert!(marker.exists(), "the install-detection probe ran");
     let _ = fs::remove_dir_all(&dir);
 }
+
+/// LawCraft's `update` subcommand answers `--help` / `-h` like the other subcommands (#968).
+#[test]
+fn update_subcommand_prints_usage_for_help() {
+    for flag in ["--help", "-h"] {
+        let out = Command::new(env!("CARGO_BIN_EXE_wordcraft-cli")).args(["update", flag]).output().expect("spawn");
+        assert!(out.status.success(), "update {flag}: {:?}", out.status);
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(stdout.starts_with("wordcraft-cli — "), "update {flag}: {stdout}");
+        assert!(out.stderr.is_empty(), "update {flag}: stderr {}", String::from_utf8_lossy(&out.stderr));
+    }
+}

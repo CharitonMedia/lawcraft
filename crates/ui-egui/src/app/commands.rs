@@ -3,7 +3,6 @@ use super::{
     file_dialogs, i18n, json, keeps_everything, keytips, now_ms, options, panes, paste_picture, printing, push_recent_font, system_clipboard,
     table_pen, theme, widgets, zotero,
 };
-use crate::update;
 
 impl WordApp {
     /// `run` for a command a mouse drag on a table sends: the view stays where it is.
@@ -33,8 +32,7 @@ impl WordApp {
         // close, New or Open counts it as a change (#1348). A draft the document refuses is not
         // part of it: saving and exporting go on without it (the refusal stays on the status
         // line), and replacing the document asks Save / Don't Save / Cancel about it.
-        // A module's command that opens a new document in place of this one counts it too.
-        let replaces = self.session.registry.get(id).is_some_and(|c| c.replaces_document);
+        let replaces = crate::addins::replaces_document(self, id);
         let refused = if replaces || flushes_comment_drafts(id, &params) { panes::flush_comment_drafts(self).err() } else { None };
         if id == "file.recover" && params.as_object().is_none_or(|p| p.is_empty()) {
             self.ui.backstage = true;
@@ -47,12 +45,12 @@ impl WordApp {
             self.dialog = dialogs::Dialog::open(name, self);
             return Ok(json!({"pending": name}));
         }
-        if let Some(what) = self.addin_input_dialog(id, &params) {
-            return Ok(json!({"pending": what}));
+        if let Some(r) = crate::addins::before_user_run(self, id, &params) {
+            return r;
         }
-        if (self.session.dirty || self.save_unconfirmed() || refused.is_some())
-            && (replaces || discards_document(id, &params))
-            && !self.closes_only_its_window(id, &params)
+        // The same unsaved work the control channel's refusal covers, so the prompt and the
+        // refusal can't drift apart (#3274).
+        if (self.document_unsaved() || refused.is_some()) && (replaces || discards_document(id, &params)) && !self.closes_only_its_window(id, &params)
         {
             let name = self.prompt_name();
             self.dialog = Some(dialogs::Dialog::SaveChanges {
@@ -81,6 +79,7 @@ impl WordApp {
         }
         let applied = applied_font(id, &params);
         let r = self.execute_user(id, params);
+        let r = crate::addins::decorate_run(self, id, r);
         // A save error already on the status line is the reason to see; the refusal shows otherwise.
         if let (Some(e), true) = (refused, r.is_ok()) {
             self.status(e);
@@ -91,15 +90,12 @@ impl WordApp {
         if matches!(id, "insert.picture" | "insert.icon") {
             self.select_inserted_picture(&r);
         }
-        // review.spelling only moves the selection to the next issue; without this, the ribbon's
-        // Spelling & Grammar and Editor buttons looked broken — just a selection with no way to
-        // see or apply a suggestion (#3340). Reuse the context menu's suggestions, as Shift+F10
-        // already does for the word at the caret.
-        if id == "review.spelling"
+        // User proofing opens the persistent task pane; scripts keep structured results.
+        // Right-click and Shift+F10 retain their compact suggestions menu.
+        if matches!(id, "review.spelling" | "review.editor")
             && let Ok(v) = &r
-            && v.get("done").and_then(serde_json::Value::as_bool) != Some(true)
         {
-            self.canvas.context_menu_from_keys = true;
+            self.spelling_review = Some(crate::proofing_pane::SpellingForm::new(self, v.clone()));
         }
         let r = system_clipboard::explain(self, id, r);
         // Check Accessibility shows its findings in the Accessibility pane, kept up to date there.
@@ -116,23 +112,13 @@ impl WordApp {
     }
 
     /// Run a command for a script or an agent (control channel, MCP bridge): never asks first.
-    /// UI-level commands (`ui.*`) are handled here, the rest by the engine. Turning an add-in on
-    /// or off (`file.options {"modules": …}`) applies it here, for scripts and the interface
-    /// alike: one being turned off first saves what its options page has pending.
+    /// UI-level commands (`ui.*`) are handled here, the rest by the engine.
     pub fn execute(&mut self, id: &str, params: Value) -> Result<Value, String> {
-        if id == "file.options" && params.get("modules").is_some() {
-            self.guard_addin_off(id, &params)?;
-            let r = self.execute_inner(id, params);
-            if r.is_ok() {
-                self.sync_addins();
-            }
-            return r;
-        }
-        self.execute_inner(id, params)
+        crate::addins::execute(self, id, params)
     }
 
-    /// [`WordApp::execute`] apart from turning add-ins on or off.
-    fn execute_inner(&mut self, id: &str, params: Value) -> Result<Value, String> {
+    /// [`WordApp::execute`] body after add-in / update intercepts.
+    pub(crate) fn execute_inner(&mut self, id: &str, params: Value) -> Result<Value, String> {
         self.clear_command_targets(id);
         if let Some(error) = self.document_required_error(id) {
             return Err(error);
@@ -142,6 +128,13 @@ impl WordApp {
         }
         if id == "file.close" {
             return self.close_document(&params);
+        }
+        // `file.closeDocument` closes the document its `id` names (the active one by default):
+        // the same unsaved work would go with it, so it needs the same explicit `force` (#3274).
+        if id == "file.closeDocument"
+            && let Some(e) = crate::control::close_refused(self, id, &params)
+        {
+            return Err(e.into());
         }
         if id == "file.autosave" {
             return self.set_autosave(&params);
@@ -156,14 +149,6 @@ impl WordApp {
             }
             return r;
         }
-        if id == "file.checkForUpdates"
-            && update::can_run_off_thread(self)
-            && let Some(ctx) = self.ctx.clone()
-        {
-            let startup = params.get("startup").and_then(Value::as_bool) == Some(true);
-            update::queue_check(self, params, !startup, &ctx);
-            return Ok(json!({"pending": "updateCheck"}));
-        }
         // Web: saving and exporting become downloads.
         if self.services.download.is_some() && matches!(id, "file.save" | "file.saveAs" | "file.exportPdf" | "file.exportPng") {
             let name = params.get("path").and_then(Value::as_str).map(str::to_string).unwrap_or_else(|| self.web_save_name(id));
@@ -173,7 +158,7 @@ impl WordApp {
                 && let Some(pw) = params.get("password").filter(|v| !v.is_null())
             {
                 if !wordcraft_engine::io::can_encrypt(&name) || pw.as_str().is_none_or(str::is_empty) {
-                    return Err("only Word documents (.docx, .docm, .dotx, .dotm) can be saved with a password, and it can't be empty".into());
+                    return Err("only Word documents (.docx, .docm, .dotx, .dotm) and OpenDocument text files (.odt, .ott) can be saved with a password, and it can't be empty".into());
                 }
                 self.session.run("file.encrypt", &json!({"password": pw})).map_err(|e| e.to_string())?;
             }
@@ -344,7 +329,8 @@ impl WordApp {
                 file_dialogs::Asked::Busy => Ok(json!({"saved": false})),
             };
         }
-        let retry = (id == "file.open").then(|| params.clone());
+        // Opening a file, or a new document from a template, reads a file that may be protected.
+        let retry = matches!(id, "file.open" | "file.newFromTemplate").then(|| params.clone());
         let retry_path = retry.clone();
         let r = self.execute(id, params);
         if let (Err(e), Some(params)) = (&r, retry)
@@ -352,7 +338,8 @@ impl WordApp {
         {
             let path = params.get("path").and_then(Value::as_str).unwrap_or("");
             let name = std::path::Path::new(path).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| path.to_string());
-            self.dialog = Some(dialogs::Dialog::Password { name, params, password: Default::default(), message: String::new() });
+            self.dialog =
+                Some(dialogs::Dialog::Password { name, then: id.to_string(), params, password: Default::default(), message: String::new() });
             return Ok(json!({"pending": "password"}));
         }
         // Whoever asked, a failed open names the file and the cause (#1103).
@@ -372,24 +359,6 @@ impl WordApp {
             self.ui.backstage = false;
         }
         r
-    }
-
-    /// A finished update asked to quit. Run the normal close path (unlike a user quit, it hasn't
-    /// been confirmed against the document as it is now), so a document edited after the update
-    /// worker finished still gets the save prompt. Returns true once the close may begin; false
-    /// when the document is dirty and the prompt was shown (or nothing was pending).
-    pub fn update_quit_requested(&mut self) -> bool {
-        if self.update.reboot_notice {
-            return false;
-        }
-        if !std::mem::take(&mut self.update.quit_pending) {
-            return false;
-        }
-        // Don't Save was the answer for this revision: close without asking again.
-        if self.session.dirty && !self.update.unsaved_blocks(&self.session) {
-            self.quit_requested = true;
-        }
-        self.close_requested()
     }
 
     fn after_command(&mut self, id: &str) {
@@ -439,6 +408,9 @@ impl WordApp {
         for req in std::mem::take(&mut self.session.ui_requests) {
             self.handle_request(&req);
         }
+        // The open document goes to the front of the recent list after every command. The recent
+        // commands (`ui.recentRemove`, `ui.recentClear`) return from `ui_command` before this
+        // runs, so taking a document off the list is never undone by the re-add (#2716).
         if let Some(p) = self.session.path.as_ref().map(|p| p.to_string_lossy().to_string())
             && self.ui.recent.first() != Some(&p)
         {
@@ -456,13 +428,6 @@ impl WordApp {
             || (self.canvas.table_tool == Some(crate::table_pen::TableTool::Erase) && self.session.sel.focus.path.cell().is_none())
         {
             crate::table_pen::stop(self);
-        }
-    }
-
-    /// UI requests produced off the UI thread (for example the update-check worker).
-    pub(crate) fn apply_ui_requests(&mut self, requests: Vec<Value>) {
-        for req in requests {
-            self.handle_request(&req);
         }
     }
 
@@ -493,20 +458,13 @@ impl WordApp {
         if req.get("toggle").and_then(Value::as_str) == Some("interfaceTheme") {
             self.ui.theme = if self.ui_is_dark() { theme::Appearance::Light } else { theme::Appearance::Dark };
         }
-        // An add-in's own window: the add-in opens it (`{"addin": id, "open": what}`).
-        if let Some(id) = req.get("addin").and_then(Value::as_str) {
-            let what = req.get("open").and_then(Value::as_str).unwrap_or("");
-            self.with_addin(id, |a, _| a.open(what));
+        if crate::addins::handle_ui_request(self, req) {
             return;
         }
         if let Some(what) = req.get("open").and_then(Value::as_str) {
             match what {
                 "openFile" => self.open_dialog(),
-                "pdfImportReport" => {
-                    let warnings =
-                        req.get("warnings").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).map(str::to_string).collect();
-                    self.dialog = Some(dialogs::Dialog::PdfImportReport { warnings });
-                }
+                "pdfImportReport" => super::pdf_import_ui::open_report(self, req),
                 "saveAs" => {
                     self.save_as_dialog();
                 }
@@ -522,10 +480,8 @@ impl WordApp {
                 "options" => {
                     self.ui.backstage = true;
                     self.ui.backstage_page = "options".into();
-                    if let Some(pane) = req.get("pane").and_then(Value::as_str)
-                        && (pane == self.ui.options_pane || self.leave_addin_page())
-                    {
-                        self.ui.options_pane = pane.into();
+                    if let Some(pane) = req.get("pane").and_then(Value::as_str) {
+                        crate::addins::maybe_set_options_pane(self, pane);
                     }
                 }
                 "pasteSpecial" => self.dialog = Some(dialogs::Dialog::paste_special(self, req)),
@@ -536,18 +492,8 @@ impl WordApp {
         if req.get("close").is_some() {
             self.quit_requested = true;
         }
-        if req.get("quit").and_then(Value::as_bool) == Some(true) {
-            self.quit_requested = true;
-        }
-        if let Some(up) = req.get("update") {
-            update::apply_command_result(self, up);
-        }
-        if req.get("updateReboot").is_some() {
-            self.update.reboot_notice = true;
-        }
-        if req.get("updateMacDmg").and_then(Value::as_bool) == Some(true) {
-            self.update_feedback(tl!("Drag WordCraft into Applications, then reopen it."));
-        }
+        crate::addins::after_ui_request(self, req);
+        crate::windows::arrange::request(self, req);
     }
 
     /// A request made for document `document`, which isn't shown and which no other window
@@ -579,8 +525,7 @@ impl WordApp {
 
     /// Commands that live in the UI layer.
     pub(crate) fn ui_command(&mut self, id: &str, p: &Value) -> Option<Result<Value, String>> {
-        // LawCraft: WordCraft's Check for Updates runs LawCraft's own updater.
-        if let Some(r) = crate::update::wordcraft_command(self, id) {
+        if let Some(r) = crate::addins::wordcraft_command(self, id) {
             return Some(r);
         }
         let s = |k: &str| p.get(k).and_then(Value::as_str);
@@ -593,32 +538,14 @@ impl WordApp {
                 let tab = s("tab").unwrap_or("Home").to_string();
                 if tab == "File" {
                     self.ui.backstage = true;
-                } else if !self.ui.backstage || self.leave_addin_page() {
-                    // Leaving File from an add-in's options page lets it save first; when it
-                    // can't, File stays open.
-                    self.ui.tab = tab;
-                    self.ui.backstage = false;
+                } else {
+                    crate::addins::leave_file_for_tab(self, tab);
                 }
                 json!({"tab": self.ui.tab})
             }
             "ui.backstage" => {
                 let want = p.get("value").and_then(Value::as_bool).unwrap_or(!self.ui.backstage);
-                let page = s("page").map(str::to_string);
-                let pane = s("pane").map(str::to_string);
-                // Leaving an add-in's options page (closing File, another page or pane) lets it
-                // save first; when it can't, it stays.
-                let leaving = !want
-                    || page.as_deref().is_some_and(|p| p != self.ui.backstage_page)
-                    || pane.as_deref().is_some_and(|p| p != self.ui.options_pane);
-                if !leaving || self.leave_addin_page() {
-                    self.ui.backstage = want;
-                    if let Some(pg) = page {
-                        self.ui.backstage_page = pg;
-                    }
-                    if let Some(pane) = pane {
-                        self.ui.options_pane = pane;
-                    }
-                }
+                crate::addins::set_backstage(self, want, s("page").map(str::to_string), s("pane").map(str::to_string));
                 json!({"backstage": self.ui.backstage})
             }
             "ui.dialog" if s("name") == Some("colors") => {
@@ -756,6 +683,17 @@ impl WordApp {
                 self.read_system_animations();
                 json!({"animations": self.ui.animations.code(), "enabled": self.animations_on(), "system": self.system_animations})
             }
+            "ui.statusCount" => {
+                // `words` (the default), `characters` or `charactersNoSpaces`: what the status
+                // bar's live count shows; no value reads it (#2797).
+                if let Some(v) = s("value") {
+                    match crate::StatusCount::from_code(v) {
+                        Some(c) => self.ui.status_count = c,
+                        None => return Some(Err(format!("unknown status count {v:?}; use words, characters or charactersNoSpaces"))),
+                    }
+                }
+                json!({"statusCount": self.ui.status_count.code()})
+            }
             "ui.language" => {
                 // `auto` (follow the system) or a language code; anything else is an error.
                 if let Some(v) = s("value") {
@@ -833,6 +771,7 @@ impl WordApp {
             // Native printing submits the selected queue on a worker; the browser owns its dialog.
             "ui.printSettings" => return Some(printing::settings(&mut self.printing, p, self.services.printers.as_ref())),
             "ui.print" | "ui.printSubmit" => return Some(self.print_to_system(p)),
+            "ui.printCancel" => return Some(printing::cancel(self)),
             // File › Options › General › Make WordCraft the default… changes the user's system
             // default apps (Linux) or opens system settings (Windows), so only a click on that
             // button does it ([`WordApp::make_default_app`]); scripts, the control channel and
@@ -876,6 +815,50 @@ impl WordApp {
                     Some(_) => return Some(Err("`value` must be true or false".into())),
                 }
                 json!({"startScreen": self.ui.start_screen})
+            }
+            "ui.recentRemove" => {
+                // Backstage ▸ Home/Open ▸ Recent: take one document off the list (Word's context
+                // menu Remove). The path must be an entry that is on the list (#2716).
+                let Some(path) = p.get("path").and_then(Value::as_str) else {
+                    return Some(Err("`path` must name a document on the recent list".into()));
+                };
+                let before = self.ui.recent.len();
+                self.ui.recent.retain(|r| r != path);
+                if self.ui.recent.len() == before {
+                    return Some(Err(format!("`{path}` is not on the recent list")));
+                }
+                let saved = self.save_prefs_now();
+                if !matches!(saved, Some(Err(_))) {
+                    let name = std::path::Path::new(path).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or(path.to_string());
+                    self.status(i18n::fmt(tl!("Removed {name} from the recent list"), &[("name", &name)]));
+                }
+                let mut r = json!({"removed": 1, "recent": self.ui.recent});
+                add_saved(&mut r, saved);
+                r
+            }
+            "ui.recentClear" => {
+                // Clear the whole list, as Word's registry clear does for recent documents (#2716).
+                let removed = self.ui.recent.len();
+                self.ui.recent.clear();
+                let saved = self.save_prefs_now();
+                if !matches!(saved, Some(Err(_))) {
+                    self.status(i18n::fmt(tl!("Removed {count} documents from the recent list"), &[("count", &removed.to_string())]));
+                }
+                let mut r = json!({"removed": removed, "recent": self.ui.recent});
+                add_saved(&mut r, saved);
+                r
+            }
+            "ui.displayServer" => {
+                // File › Options › Advanced › Linux display server (#2184): `value` `auto`,
+                // `wayland` or `x11`; no value reads it. The desktop app reads it at the next launch.
+                match p.get("value") {
+                    None => {}
+                    Some(v) => match v.as_str().and_then(crate::DisplayServer::from_code) {
+                        Some(d) => self.ui.display_server = d,
+                        None => return Some(Err(format!("unknown display server {v}; use auto, wayland or x11"))),
+                    },
+                }
+                json!({"displayServer": self.ui.display_server.code()})
             }
             // Shape Format › Text › Create Link: the next click on an empty text box links the
             // selected box to it (`shape.link` with that box as the target); Esc cancels.
@@ -1079,9 +1062,24 @@ fn input_dialog_other(id: &str, params: &Value) -> Option<&'static str> {
         "review.language" if no_settings(params) => Some("language"),
         "tools.autocorrect" if no_settings(params) => Some("autoCorrect"),
         "tools.templates" => Some("templates"),
+        // Macros without a name to run, define or delete shows its dialog (#4327); scripts get the list.
+        "tools.macros" if !["run", "define", "delete"].into_iter().any(|key| has_value(params, key)) => Some("macros"),
         "styles.organizer" if !has_value(params, "path") => Some("organizer"),
         "developer.properties" if no_settings(params) => Some("controlProperties"),
         _ => None,
+    }
+}
+
+/// The result fields of a command that saves the preferences at once: `saved` is true when the
+/// write worked, false with `saveError` when it failed (the change still holds for this run) and
+/// null when the host has no preferences hook or wrote nothing.
+fn add_saved(r: &mut Value, saved: Option<Result<(), String>>) {
+    r["saved"] = match &saved {
+        None => Value::Null,
+        Some(res) => json!(res.is_ok()),
+    };
+    if let Some(Err(e)) = saved {
+        r["saveError"] = json!(e);
     }
 }
 
@@ -1110,6 +1108,7 @@ pub(crate) fn works_without_document(id: &str) -> bool {
             | "tools.customizeKeyboard"
             | "tools.customizeRibbon"
             | "view.darkMode"
+            | "view.paperColor"
             | "view.marks"
             | "view.ruler"
             | "view.numeral"
@@ -1127,15 +1126,19 @@ pub(crate) fn works_without_document(id: &str) -> bool {
             | "ui.language"
             | "ui.saveChanges"
             | "ui.openFileDialog"
+            | "ui.printCancel"
             | "ui.fileBrowser"
             | "ui.makeDefaultApp"
             | "ui.discord"
             | "ui.caretAnimation"
             | "ui.startScreen"
+            | "ui.recentRemove"
+            | "ui.recentClear"
+            | "ui.displayServer"
+            | "ui.statusCount"
             | "ui.checkForUpdates"
-            | "file.checkForUpdates"
-            | "file.updatePrefs"
-    ) || id.starts_with("help.")
+    ) || crate::addins::works_without_document(id)
+        || id.starts_with("help.")
 }
 
 /// Commands that save, export, print, send or replace the document: comment text still being

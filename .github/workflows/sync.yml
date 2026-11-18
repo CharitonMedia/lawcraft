@@ -1,6 +1,7 @@
 name: Sync with WordCraft
 
-# Once a week (Monday, early morning): merge WordCraft's main, run the full quality gate, and push to main when it passes.
+# Once a week (Monday, early morning): merge WordCraft's newest release tag (highest vX.Y.Z),
+# run the full quality gate, and push to main when it passes.
 # When the merge or the gate fails, nothing is pushed and an issue is opened (or updated) and
 # assigned to the maintainer, so GitHub emails him; a later passing run closes it.
 on:
@@ -24,7 +25,7 @@ concurrency:
 env:
   CRAFT_FONTS_REF: bfcbf714e45a3ea8e98f88ab2b7971372a576414
   MAINTAINER: pattalkslaw-del
-  ISSUE_TITLE: "Nightly WordCraft sync needs attention"
+  ISSUE_TITLE: "Weekly WordCraft sync needs attention"
 
 jobs:
   sync:
@@ -77,7 +78,7 @@ jobs:
           echo "error: alert test requested; failing on purpose" >&2
           exit 1
 
-      - name: Merge WordCraft main
+      - name: Merge WordCraft release tag
         id: merge
         run: |
           git config user.name "LawCraft sync"
@@ -122,7 +123,7 @@ jobs:
           if [ "$ALERT_TEST" = true ]; then
             why="This is a test of the sync's failure alert. Nothing is wrong; close this issue."
           elif [ -n "$CONFLICTS" ]; then
-            why="Merging WordCraft's main conflicts with LawCraft in: \`$CONFLICTS\`. Nothing was pushed."
+            why="Merging WordCraft's release tag conflicts with LawCraft in: \`$CONFLICTS\`. Nothing was pushed."
           else
             why="The weekly sync failed before or during the quality gate (\`cargo xtask ci\`). Nothing was pushed."
           fi

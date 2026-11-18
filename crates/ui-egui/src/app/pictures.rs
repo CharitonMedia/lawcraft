@@ -24,17 +24,6 @@ impl WordApp {
         }
     }
 
-    /// A one-line update answer: the status bar in the editor, plus a durable bar over Backstage,
-    /// whose status bar is hidden. A manual check runs from File ▸ Check for updates, and the macOS
-    /// handoff instruction and install errors must stay visible there (#15 review).
-    pub(crate) fn update_feedback(&mut self, s: impl Into<String>) {
-        let text = s.into();
-        self.status(text.clone());
-        if self.ui.backstage {
-            self.update.message = Some(text);
-        }
-    }
-
     /// Media key of the selected picture, if any.
     pub(crate) fn selected_picture_media(&self) -> Option<String> {
         match wordcraft_engine::cmd::objects::selected(&self.session) {

@@ -8,12 +8,15 @@ pub mod citations;
 pub mod column;
 pub mod connectors;
 pub mod controls;
+mod core_wraps;
 pub mod design;
 pub mod draw;
 pub mod edit;
 pub mod equation;
 pub mod fields;
 pub mod file;
+mod file_open;
+pub(crate) use core_wraps::install as install_core_wraps;
 pub mod find_pattern;
 pub mod fmt_revisions;
 pub mod font;
@@ -28,6 +31,7 @@ pub mod moves;
 pub mod objects;
 pub mod options;
 pub mod outline;
+pub mod packs;
 pub mod page;
 pub mod para;
 pub mod paste;
@@ -47,6 +51,7 @@ pub mod table_style;
 pub mod templates;
 pub mod text;
 pub mod tools;
+pub mod tracked_edit;
 pub mod update;
 pub mod user_templates;
 pub mod view;
@@ -57,6 +62,8 @@ use wordcraft_doc::props::CharProps;
 use wordcraft_doc::{Pos, Revision, RevisionKind, StoryRef};
 
 use crate::{CmdError, CmdResult, Registry, Session};
+
+pub use tracked_edit::{replace_blocks, replace_text};
 
 /// The full registry.
 pub fn registry() -> Registry {
@@ -86,6 +93,7 @@ pub fn registry() -> Registry {
     v.extend(file::specs());
     v.extend(update::specs());
     v.extend(options::specs());
+    v.extend(packs::specs());
     v.extend(design::specs());
     v.extend(references::specs());
     v.extend(fields::specs());
@@ -169,6 +177,9 @@ pub(crate) fn delete_selection_effect(s: &mut Session) -> Result<SelectionDelete
     if a == b {
         return Ok(SelectionDelete { at: a, content_changed: false, state_changed: false });
     }
+    if canvas::selected_member(s).is_some() {
+        return Err(CmdError::Disabled("a shape inside a drawing canvas is selected".into()));
+    }
     controls::check_delete(s, &a, &b)?;
     let effect = if s.doc.settings.track_changes {
         if !track_delete_would_change(s, &a, &b) {
@@ -186,7 +197,9 @@ pub(crate) fn delete_selection_effect(s: &mut Session) -> Result<SelectionDelete
     Ok(effect)
 }
 
-/// Delete the selection (respecting track changes); returns the collapsed position.
+/// Delete the selection (respecting track changes); returns the collapsed position. With a
+/// Drawing Canvas member picked (#2637) the selection is the whole canvas, which a command that
+/// replaces the selection (Insert › Table, Equation, Symbol, Field…) would take away: refused.
 pub fn delete_selection(s: &mut Session) -> Result<Pos, CmdError> {
     delete_selection_effect(s).map(|e| e.at)
 }
@@ -272,76 +285,6 @@ pub(crate) struct TrackDeleteEffect {
     pub changed: bool,
 }
 
-/// Replace `a..b` (within one paragraph) with `text`, as Track Changes records typing over a
-/// selection when it is on: the old text is marked deleted (or removed, when this author inserted
-/// it) and the new text marked inserted, so Reject restores the old. With tracking off it is a
-/// plain replacement. Modules use this for an automatic correction. Returns the end of the new text.
-pub fn replace_text(s: &mut Session, a: &Pos, b: &Pos, text: &str) -> Result<Pos, CmdError> {
-    if a.story != b.story || a.path != b.path || b.off < a.off {
-        return Err(CmdError::Params("replace_text works within one paragraph".into()));
-    }
-    let props = s.doc.para(a.story, &a.path).map(|p| p.props_of_char(a.off).clone()).ok_or_else(|| CmdError::Failed("no paragraph there".into()))?;
-    if !s.doc.settings.track_changes {
-        let p = s.doc.para_mut(a.story, &a.path)?;
-        p.delete(a.off, b.off)?;
-        p.insert_text(a.off, text, &props)?;
-        p.touch();
-        return Ok(Pos { off: a.off + text.len(), ..a.clone() });
-    }
-    // The new text goes in after the old first, so deleting the old can't move it.
-    let rid = new_revision(s, RevisionKind::Insert);
-    let ins = CharProps { ins: Some(rid), del: None, ..props };
-    let p = s.doc.para_mut(a.story, &a.path)?;
-    p.insert_text(b.off, text, &ins)?;
-    p.touch();
-    let before = s.doc.para(a.story, &a.path).map_or(0, |p| p.len());
-    track_delete(s, a, b)?;
-    let removed = before.saturating_sub(s.doc.para(a.story, &a.path).map_or(0, |p| p.len()));
-    Ok(Pos { off: b.off - removed + text.len(), ..a.clone() })
-}
-
-/// Replace top-level blocks `from..to` of `story` with `blocks`, as one tracked change when Track
-/// Changes is on: the new paragraphs go in marked inserted and the old ones are marked deleted,
-/// so Reject All brings the old ones back. With tracking off the old blocks are simply replaced.
-pub fn replace_blocks(s: &mut Session, story: StoryRef, from: usize, to: usize, blocks: Vec<wordcraft_doc::Block>) -> Result<(), CmdError> {
-    use wordcraft_doc::{Block, Path};
-    if !s.doc.settings.track_changes {
-        for i in (from..to).rev() {
-            s.doc.remove_block(story, &Path::top(i))?;
-        }
-        for (k, b) in blocks.into_iter().enumerate() {
-            s.doc.insert_block(story, &Path::top(from + k), b)?;
-        }
-        return Ok(());
-    }
-    let rid = new_revision(s, RevisionKind::Insert);
-    let n = blocks.len();
-    for (k, mut b) in blocks.into_iter().enumerate() {
-        if let Block::Para(p) = &mut b {
-            let len = p.len();
-            p.format(0, len, &|c| c.ins = Some(rid))?;
-            p.mark.ins = Some(rid);
-        }
-        s.doc.insert_block(story, &Path::top(from + k), b)?;
-    }
-    if to > from {
-        // The old blocks now sit after the new ones. Their paragraph marks go too: the deletion
-        // runs to the start of the block after them when there is one.
-        let (old_from, old_to) = (from + n, to + n);
-        let a = Pos { story, path: Path::top(old_from), off: 0 };
-        let b = match s.doc.block(story, &Path::top(old_to)) {
-            Some(Block::Para(_)) => Pos { story, path: Path::top(old_to), off: 0 },
-            _ => {
-                let last = Path::top(old_to - 1);
-                let len = s.doc.para(story, &last).map_or(0, |p| p.len());
-                Pos { story, path: last, off: len }
-            }
-        };
-        track_delete(s, &a, &b)?;
-    }
-    Ok(())
-}
-
 /// Tracked deletion: own insertions are removed, other text is marked deleted.
 ///
 /// Preflights first: an all-already-deleted range does nothing and creates no revision record.
@@ -412,19 +355,24 @@ pub(crate) struct InsertEffect {
 
 /// Insert typed text at the caret (replacing the selection), with pending formatting and track changes.
 pub fn type_text(s: &mut Session, text: &str) -> Result<(), CmdError> {
-    insert_text(s, text, true).map(|_| ())
+    insert_text(s, text, true, None).map(|_| ())
 }
 
 /// [`type_text`] with the effect the insertion had.
 pub(crate) fn type_text_effect(s: &mut Session, text: &str) -> Result<InsertEffect, CmdError> {
-    insert_text(s, text, true)
+    insert_text(s, text, true, None)
 }
 
 /// Insert pasted plain text like [`type_text`], except that its paragraph separators are text
 /// being transferred, not Enter key presses: an empty list item between them stays (Enter on
 /// one would end the list).
 pub fn paste_text(s: &mut Session, text: &str) -> Result<(), CmdError> {
-    insert_text(s, text, false).map(|_| ())
+    insert_text(s, text, false, None).map(|_| ())
+}
+
+/// Insert typed text in a chosen language without losing caret formatting or tracked changes.
+pub fn type_text_with_lang(s: &mut Session, text: &str, language: Option<&str>) -> Result<(), CmdError> {
+    insert_text(s, text, true, language).map(|_| ())
 }
 
 /// Inserts typed or pasted text at the caret: resolves field ends and content-control placeholders,
@@ -433,7 +381,7 @@ pub fn paste_text(s: &mut Session, text: &str) -> Result<(), CmdError> {
 /// text; a one-line control suppresses typed breaks only. It gives an otherwise undirected paragraph
 /// right-to-left direction when its first strong letter is RTL, and returns whether content or state
 /// changed.
-fn insert_text(s: &mut Session, text: &str, enter: bool) -> Result<InsertEffect, CmdError> {
+fn insert_text(s: &mut Session, text: &str, enter: bool, language: Option<&str>) -> Result<InsertEffect, CmdError> {
     let mut props = s.typing_props();
     if s.sel.is_collapsed() {
         s.sel = crate::Selection::caret(s.doc.past_field_ends(&s.sel.focus));
@@ -447,6 +395,9 @@ fn insert_text(s: &mut Session, text: &str, enter: bool) -> Result<InsertEffect,
     // Pasted text is text: pending properties left by AutoCorrect don't give it a symbol's font (#2036).
     if !enter {
         props = props.without_symbol();
+    }
+    if let Some(language) = language {
+        props.lang = Some(language.to_string());
     }
     let deletion = delete_selection_effect(s)?;
     // Typed text is new: never deleted, and not a formatting change of the text around it.
@@ -618,6 +569,59 @@ pub fn now_iso() -> String {
     iso_from_unix_secs(now_unix())
 }
 
+/// The local time zone's offset from UTC in seconds (east positive) at `unix`, daylight saving
+/// included: the system's zone, or the browser's on the web. 0 (UTC) when it can't be found.
+pub fn local_offset_secs(unix: u64) -> i64 {
+    system_offset_secs(unix).clamp(-26 * 3600, 26 * 3600)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn system_offset_secs(unix: u64) -> i64 {
+    use chrono::Offset;
+    let Some(utc) = i64::try_from(unix).ok().and_then(|secs| chrono::DateTime::from_timestamp(secs, 0)) else {
+        return 0;
+    };
+    // chrono's `Local` has internal `expect`s (unreadable zone data, an unmapped Windows year), so
+    // fence it: a failure means UTC, never a crash. A caught panic is still reported by the app's
+    // panic hook (logged, no abort); the document is untouched.
+    std::panic::catch_unwind(|| i64::from(utc.with_timezone(&chrono::Local).offset().fix().local_minus_utc())).unwrap_or(0)
+}
+
+/// On the web the browser's `Date` gives the offset directly (chrono isn't used there).
+#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+fn system_offset_secs(unix: u64) -> i64 {
+    let ms = (unix as f64) * 1000.0;
+    if !ms.is_finite() {
+        return 0;
+    }
+    // `getTimezoneOffset` is minutes *west* of UTC (UTC+13 gives -780); NaN for an invalid date.
+    let west_min = js_sys::Date::new(&js_sys::wasm_bindgen::JsValue::from_f64(ms)).get_timezone_offset();
+    if west_min.is_finite() && west_min.abs() <= 26.0 * 60.0 { -(west_min as i64) * 60 } else { 0 }
+}
+
+/// Other wasm targets (WASI) have neither chrono's clock nor a browser: UTC.
+#[cfg(all(target_arch = "wasm32", not(target_os = "unknown")))]
+fn system_offset_secs(_unix: u64) -> i64 {
+    0
+}
+
+/// The local civil date and time now: see [`local_civil`].
+pub fn local_now() -> (i64, u32, u32, (u32, u32, u32), i64) {
+    let now = now_unix();
+    local_civil(now, local_offset_secs(now))
+}
+
+/// Local civil date and time for an instant: (year, month, day, (hour, minute, second), days since
+/// 1970-01-01 of that local day, for the weekday). `offset_secs` is the local zone's offset from
+/// UTC (east positive). Saturating, so a hostile offset or clock never overflows.
+pub fn local_civil(unix: u64, offset_secs: i64) -> (i64, u32, u32, (u32, u32, u32), i64) {
+    let local = i64::try_from(unix).unwrap_or(i64::MAX).saturating_add(offset_secs);
+    let days = local.div_euclid(86_400);
+    let t = local.rem_euclid(86_400) as u32;
+    let (y, m, d) = civil_from_days(days);
+    (y, m, d, (t / 3600, t / 60 % 60, t % 60), days)
+}
+
 /// Days since 1970-01-01 → (year, month, day).
 ///
 /// `NaiveDate` only covers about ±262143 years, but this is reached by the system clock (and by
@@ -699,60 +703,5 @@ mod iso_tests {
         assert_eq!(civil_from_days(-99_000_000), (-269_083, 3, 17));
         // The extremes must not overflow or panic (i128 intermediates).
         let _ = (civil_from_days(i64::MAX), civil_from_days(i64::MIN));
-    }
-}
-
-#[cfg(test)]
-mod tracked_edit_tests {
-    use serde_json::json;
-    use wordcraft_doc::{Block, Document, Paragraph, Path, Pos, StoryRef};
-
-    use super::{replace_blocks, replace_text};
-    use crate::Session;
-
-    fn body(s: &Session) -> String {
-        s.doc.plain_text(StoryRef::Body)
-    }
-
-    fn at(off: usize) -> Pos {
-        Pos { story: StoryRef::Body, path: Path::top(0), off }
-    }
-
-    /// A module's automatic correction is a tracked change while Track Changes is on: Reject All
-    /// brings the old text back, Accept All keeps the new.
-    #[test]
-    fn replace_text_is_tracked_when_tracking_is_on() {
-        for (answer, want) in [("review.rejectAll", "Section 1"), ("review.acceptAll", "Section\u{a0}1")] {
-            let mut s = Session::new(Document::from_text("Section 1"));
-            s.run("review.trackChanges", &json!({"value": true})).unwrap();
-            replace_text(&mut s, &at(7), &at(8), "\u{a0}").unwrap();
-            assert!(!s.doc.revisions.is_empty(), "recorded as revisions");
-            s.run(answer, &json!({})).unwrap();
-            assert_eq!(body(&s), want, "{answer}");
-        }
-        let mut s = Session::new(Document::from_text("Section 1"));
-        replace_text(&mut s, &at(7), &at(8), "\u{a0}").unwrap();
-        assert_eq!(body(&s), "Section\u{a0}1");
-        assert!(s.doc.revisions.is_empty(), "untracked without Track Changes");
-    }
-
-    /// Replacing whole paragraphs is one tracked change: Reject All restores the old ones.
-    #[test]
-    fn replace_blocks_is_tracked_when_tracking_is_on() {
-        let new = || {
-            vec![Block::Para(Paragraph::with_text("New one", Default::default())), Block::Para(Paragraph::with_text("New two", Default::default()))]
-        };
-        for (answer, want) in [("review.rejectAll", "Heading\nOld one\nOld two\nAfter"), ("review.acceptAll", "Heading\nNew one\nNew two\nAfter")] {
-            let mut s = Session::new(Document::from_text("Heading\nOld one\nOld two\nAfter"));
-            s.run("review.trackChanges", &json!({"value": true})).unwrap();
-            replace_blocks(&mut s, StoryRef::Body, 1, 3, new()).unwrap();
-            s.run(answer, &json!({})).unwrap();
-            assert_eq!(body(&s), want, "{answer}");
-        }
-
-        let mut s = Session::new(Document::from_text("Heading\nOld one\nOld two\nAfter"));
-        replace_blocks(&mut s, StoryRef::Body, 1, 3, new()).unwrap();
-        assert_eq!(body(&s), "Heading\nNew one\nNew two\nAfter");
-        assert!(s.doc.revisions.is_empty());
     }
 }

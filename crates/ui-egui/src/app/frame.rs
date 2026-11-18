@@ -6,18 +6,37 @@ use super::{
 };
 use crate::update;
 
+use crate::i18n;
+
 impl WordApp {
     /// A file that wouldn't open (#1103): log it, and say on the status bar which file and why,
     /// whatever handed it over (the command line, a macOS open event, a drop). Returns the message.
     pub fn report_open_failure(&mut self, path: &str, error: &str) -> String {
         log::warn!("{path}: {error}");
-        let msg = crate::i18n::fmt(crate::tl!("Couldn't open {path}: {error}"), &[("path", path), ("error", error)]);
+        let msg = crate::i18n::fmt(crate::tl!("Couldn't open {path}: {error}"), &[("path", &crate::i18n::isolate_path(path)), ("error", error)]);
         self.status(msg.clone());
         msg
     }
 
     pub fn status(&mut self, s: impl Into<String>) {
         self.status_msg = Some((s.into(), now_ms()));
+    }
+
+    /// Write the current preferences out through the host's hook, if it has one (#2716). The
+    /// desktop app saves them at exit; a change that should survive a crash, like taking a
+    /// document off the recent list, needs a save at the moment of the change. `None`: the host
+    /// has no hook or wrote nothing; `Some(Err)`: the write failed, and the status line says so.
+    pub(super) fn save_prefs_now(&mut self) -> Option<Result<(), String>> {
+        let save = self.services.save_prefs.as_ref()?;
+        match save(self) {
+            Ok(true) => Some(Ok(())),
+            // The host wrote nothing (preferences switched off): same as having no hook.
+            Ok(false) => None,
+            Err(e) => {
+                self.status(i18n::fmt(tl!("Could not save the preferences: {error}"), &[("error", &e)]));
+                Some(Err(e))
+            }
+        }
     }
 
     /// Document title for the title bar (and the suggested file name). An untitled document is
@@ -78,6 +97,7 @@ impl WordApp {
                 if moved(self) {
                     return;
                 }
+                crate::language_packs::bar(self, ui);
                 chrome::status_bar(self, ui);
                 panes::show(self, ui);
             }
@@ -107,6 +127,7 @@ impl WordApp {
             return;
         }
         self.addin_dialogs(ctx);
+        super::pdf_import_ui::show(self, ctx);
         updates_ui::show(self, ctx);
         #[cfg(not(target_arch = "wasm32"))]
         file_browser::show(self, ctx);
@@ -137,7 +158,7 @@ impl WordApp {
     /// Keep the window title and full-screen state in sync, then record this frame's time.
     pub(super) fn sync_title_and_frame(&mut self, ctx: &egui::Context, t0: f64) {
         // With native windows the viewport driver gives the window its title.
-        let title = self.window_title();
+        let title = crate::i18n::rebrand(&self.window_title());
         if title != self.sent_title {
             if !self.windows.driven() {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Title(title.clone()));

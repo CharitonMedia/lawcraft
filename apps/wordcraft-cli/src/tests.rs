@@ -76,6 +76,22 @@ fn unknown_options_are_rejected_before_file_access() {
 }
 
 #[test]
+fn convert_rejects_malformed_format_options_before_file_access() {
+    for (options, error) in [
+        (vec!["--format"], "convert: --format requires a value"),
+        (vec!["--format", "--markup"], "convert: --format requires a value"),
+        (vec!["--format", "flatopc", "--format", "wordml2003"], "convert: duplicate --format option"),
+    ] {
+        let mut argv = args(&["convert", "missing.docx", "out.xml"]);
+        argv.extend(args(&options));
+        assert_eq!(run(&argv), Err(error.into()), "{options:?}");
+    }
+    // A valid single value reaches file access, rather than a format-option error.
+    let error = run(&args(&["convert", "missing.docx", "out.xml", "--format", "flatopc"])).unwrap_err().to_string();
+    assert!(error.starts_with("missing.docx:"), "{error}");
+}
+
+#[test]
 fn help_or_h_after_a_subcommand_asks_for_the_usage() {
     for cmd in SUBCOMMANDS {
         assert!(wants_help(cmd, &args(&["in.docx", "--help"])), "{cmd}");
@@ -195,6 +211,10 @@ fn only_the_opened_file_may_be_other_than_unicode() {
     let ok = |raw: Vec<OsString>| text_args(&raw).unwrap().1;
     assert_eq!(ok(vec!["zotero".into(), "refresh".into(), latin1()]), Some(PathBuf::from(latin1())));
     assert_eq!(ok(vec!["render".into(), latin1(), "out.png".into(), "--page".into(), "2".into()]), Some(PathBuf::from(latin1())));
+    assert_eq!(ok(vec!["render".into(), "--page".into(), "2".into(), latin1(), "out.png".into()]), Some(PathBuf::from(latin1())));
+    assert_eq!(ok(vec!["convert".into(), "--format".into(), "flatopc".into(), latin1(), "out.xml".into()]), Some(PathBuf::from(latin1())));
+    assert_eq!(ok(vec!["info".into(), "--password".into(), "secret".into(), latin1()]), Some(PathBuf::from(latin1())));
+    assert_eq!(ok(vec!["zotero".into(), "--port".into(), "23119".into(), "refresh".into(), latin1()]), Some(PathBuf::from(latin1())));
     assert_eq!(ok(vec!["run".into(), "--print".into(), "--file".into(), latin1()]), Some(PathBuf::from(latin1())));
     assert_eq!(ok(vec!["info".into(), "in.docx".into()]), None);
     // Every command that opens a file reaches the open with it (no such file here), so
@@ -212,6 +232,7 @@ fn only_the_opened_file_may_be_other_than_unicode() {
     for (raw, n) in [
         (vec!["zotero".into(), latin1(), "in.docx".into()], 2),
         (vec!["render".into(), "in.docx".into(), latin1()], 3),
+        (vec!["render".into(), "--page".into(), latin1(), "in.docx".into(), "out.png".into()], 3),
         (vec!["run".into(), "--save".into(), latin1()], 3),
         (vec!["commands".into(), latin1()], 2),
     ] {
@@ -544,73 +565,18 @@ fn script_parse_resolves_paths_against_the_base() {
     assert_eq!(s.commands.len(), 1);
 }
 
-/// #15: the headless MCP backend must carry the update HTTP hook, so `file.checkForUpdates`
-/// works through MCP. The injected fake proves it with no real request.
 #[test]
-fn headless_mcp_checks_for_updates_offline() {
-    use std::sync::{Arc, Mutex};
-    let calls = Arc::new(Mutex::new(Vec::new()));
-    let c = Arc::clone(&calls);
-    let http: wordcraft_engine::update::HttpGet = Arc::new(move |url, _max| {
-        c.lock().unwrap_or_else(|e| e.into_inner()).push(url.to_string());
-        Ok(br#"{"tag_name":"v0.0.1","draft":false,"prerelease":false,"assets":[]}"#.to_vec())
-    });
-    let mut h = headless_session(http, None, None).expect("headless backend");
-    assert!(h.session.update_http.is_some(), "the hook is installed");
-    let r = wordcraft_mcp::Backend::call(&mut h, "engine.execute", json!({"command": "file.checkForUpdates", "params": {"force": true}}))
-        .expect("mcp call");
-    assert_eq!(r["status"], "current");
-    let seen = calls.lock().unwrap_or_else(|e| e.into_inner()).clone();
-    assert_eq!(seen, vec![wordcraft_engine::update::LATEST_API.to_string()], "exactly one offline release request");
-}
+fn invisible_characters_are_escaped_and_json_lines_still_parse_back() {
+    let hidden = "a\u{ad}b\u{200b}c\u{200d}d\u{2060}e\u{2064}f\u{feff}g\u{e0041}h\u{e007f}i\u{85}j\u{202e}k";
+    let shown = escape_peer(hidden);
+    assert!(!shown.chars().any(is_unsafe_char), "{shown}");
+    assert!(shown.contains("\\u{e0041}") && shown.contains("\\u{ad}"), "{shown}");
+    // Errors keep a Windows path readable.
+    assert_eq!(escape_text("C:\\dir\\a.docx", false), "C:\\dir\\a.docx");
 
-/// #15: `wordcraft-cli update --check` prints exactly one JSON value. Install detection runs
-/// inside the command, so this pins the response shape at the CLI boundary: `serde_json` rejects
-/// any probe output that precedes or follows the value. The engine's captured probe helper is
-/// what keeps a `dpkg-query -S` from inheriting stdout in the first place.
-#[test]
-fn update_check_prints_one_json_value() {
-    struct FakeEnv;
-    impl wordcraft_engine::update::EnvRead for FakeEnv {
-        fn flatpak(&self) -> bool {
-            false
-        }
-        fn appimage(&self) -> Option<String> {
-            None
-        }
-        fn install_override(&self) -> Option<wordcraft_engine::update::InstallKind> {
-            Some(wordcraft_engine::update::InstallKind::Unknown)
-        }
-        fn windows(&self) -> bool {
-            false
-        }
-        fn macos(&self) -> bool {
-            false
-        }
-        fn linux(&self) -> bool {
-            true
-        }
-        fn linux_deb_package(&self, _exe: &str) -> bool {
-            false
-        }
-    }
-    let http: wordcraft_engine::update::HttpGet =
-        std::sync::Arc::new(|_, _| Ok(br#"{"tag_name":"v0.0.1","draft":false,"prerelease":false,"assets":[]}"#.to_vec()));
-    let v = run_update_check(http, Some(std::sync::Arc::new(FakeEnv))).expect("offline check");
-    let text = format_update_check_json(&v);
-    let _: Value = serde_json::from_str(text.trim()).expect("the response is one JSON value");
-    assert!(text.trim_start().starts_with('{') && text.trim_end().ends_with('}'), "no probe output wraps the JSON: {text:?}");
-}
-
-#[test]
-fn cli_open_does_not_set_the_pdf_as_an_implicit_save_target() {
-    let path = std::env::temp_dir().join(format!("wordcraft-cli-pdf-import-{}.pdf", std::process::id()));
-    let bytes = wordcraft_engine::io::save_bytes("sample.pdf", &wordcraft_doc::Document::from_text("CLI import")).unwrap();
-    std::fs::write(&path, &bytes).unwrap();
-    let mut session = open(&path, None).unwrap();
-    assert!(session.path.is_none() && session.dirty);
-    let result = session.run("file.save", &serde_json::json!({})).unwrap();
-    assert_eq!(result["saved"], false);
-    assert_eq!(std::fs::read(&path).unwrap(), bytes);
-    std::fs::remove_file(path).unwrap();
+    let value = json!({"part": hidden, "plain": "ünïcode ok"});
+    let line = json_line_safe(&value.to_string());
+    assert!(!line.chars().any(is_unsafe_char), "{line}");
+    assert!(line.contains("\\ud800") || line.contains("\\udb40"), "{line}");
+    assert_eq!(serde_json::from_str::<Value>(&line).unwrap(), value);
 }
